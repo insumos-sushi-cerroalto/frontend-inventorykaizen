@@ -525,6 +525,17 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [auth, setAuth] = useState(isAuthenticated());
 
+  const [sortColumn, setSortColumn] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [activeFilters, setActiveFilters] = useState({
+    producto_nombre: new Set(),
+    cliente: new Set(),
+    canal_venta: new Set(),
+    pagado: new Set()
+  });
+  const [activeColumnFilter, setActiveColumnFilter] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
+
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const monthNavRef = useRef(null);
@@ -538,9 +549,9 @@ const App = () => {
     }
   }, []);
 
-  const loadVentas = useCallback(async (mes = null, anio = null) => {
+  const loadVentas = useCallback(async ({ mes = null, anio = null, ordering = null, filters = {} } = {}) => {
     try {
-      const data = await fetchVentas({ mes, anio });
+      const data = await fetchVentas({ mes, anio, ordering, filters });
       setVentas(Array.isArray(data) ? data : data.results ?? []);
     } catch (error) {
       console.error('Error:', error);
@@ -575,25 +586,43 @@ const App = () => {
   }, []);
 
   // helper to deal with login event
+  const appliedFilters = useMemo(() => {
+    return Object.fromEntries(Object.entries(activeFilters)
+      .filter(([, values]) => values.size > 0)
+      .map(([key, values]) => [key, Array.from(values).sort()]));
+  }, [activeFilters]);
+
+  const orderingValue = useMemo(() => {
+    if (!sortColumn) return null;
+    return sortOrder === 'desc' ? `-${sortColumn}` : sortColumn;
+  }, [sortColumn, sortOrder]);
+
   const handleLogin = useCallback(() => {
     setAuth(true);
     // force a fresh data load after authentication
     loadProductos();
-    loadVentas(selectedMonth, selectedYear);
+    loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear]);
+  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear, orderingValue, appliedFilters]);
 
   // Cargar datos cuando el usuario está autenticado (al montar o al iniciar sesión)
   useEffect(() => {
     if (!auth) return; // no intentar cargar si no está autenticado
     loadProductos();
-    loadVentas(selectedMonth, selectedYear);
+    loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear]);
+  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear, orderingValue, appliedFilters]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Función helper para calcular la semana ISO con formato personalizado
   const getWeekInfo = (dateStr) => {
@@ -1294,6 +1323,238 @@ const App = () => {
   const VentasTab = () => {
     const [editingVenta, setEditingVenta] = useState(null);
 
+    const ventasArray = Array.isArray(ventas) ? ventas : ventas?.results ?? [];
+    const filterableColumns = [
+      { key: 'numero', label: 'N°' },
+      { key: 'fecha', label: 'Fecha' },
+      { key: 'producto_nombre', label: 'Producto' },
+      { key: 'cliente', label: 'Cliente' },
+      { key: 'canal_venta', label: 'Canal', hiddenClass: 'hidden lg:table-cell' },
+      { key: 'cantidad', label: 'Cant.' },
+      { key: 'precio_unitario', label: 'P. Unit.' },
+      { key: 'total', label: 'Total' },
+      { key: 'pagado', label: 'Pagado' }
+    ];
+
+    const isNumericColumn = (columnKey) => ['numero', 'cantidad', 'precio_unitario', 'total'].includes(columnKey);
+
+    const columnOptions = useMemo(() => {
+      const options = {};
+      filterableColumns.forEach(({ key }) => {
+        const rawValues = ventasArray.map((v) => v[key]);
+        const uniqueValues = Array.from(new Set(rawValues.filter((value) => value !== null && value !== undefined && value !== '')));
+        options[key] = uniqueValues.sort((a, b) => {
+          if (isNumericColumn(key)) {
+            return Number(a) - Number(b);
+          }
+          return String(a).localeCompare(String(b));
+        });
+      });
+      return options;
+    }, [ventasArray]);
+
+    const toggleFilterOption = (columnKey, value) => {
+      setActiveFilters((prev) => {
+        const next = { ...prev };
+        const current = new Set(next[columnKey] || []);
+        if (current.has(value)) {
+          current.delete(value);
+        } else {
+          current.add(value);
+        }
+        next[columnKey] = current;
+        return next;
+      });
+    };
+
+    const clearFilterForColumn = (columnKey) => {
+      setActiveFilters((prev) => ({ ...prev, [columnKey]: new Set() }));
+    };
+
+    const toggleColumnFilterMenu = (columnKey) => {
+      setActiveColumnFilter((prev) => (prev === columnKey ? null : columnKey));
+    };
+
+    const renderHeaderCell = ({ key, label, hiddenClass }) => {
+      const selectedCount = activeFilters[key]?.size || 0;
+      const isOpen = activeColumnFilter === key;
+      const sortLabel = isNumericColumn(key) ? 'Menor a Mayor' : 'A-Z';
+      const reverseLabel = isNumericColumn(key) ? 'Mayor a Menor' : 'Z-A';
+
+      return (
+        <th className={`p-2 md:p-3 text-left whitespace-nowrap ${hiddenClass ?? ''} relative`}>
+          <div className="flex items-center gap-2">
+            <span>{label}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleColumnFilterMenu(key);
+              }}
+              className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+              aria-label={`Abrir opciones de filtro y orden para ${label}`}
+            >
+              ▾
+            </button>
+            {selectedCount > 0 && (
+              <span className="inline-flex h-5 items-center rounded-full bg-blue-500 px-2 text-[11px] font-semibold text-white">
+                {selectedCount}
+              </span>
+            )}
+          </div>
+
+          {!isMobile && isOpen && (
+            <div className="absolute right-0 top-full z-30 mt-2 w-[18rem] min-w-[220px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">{label}</p>
+                <button type="button" onClick={() => setActiveColumnFilter(null)} className="text-sm text-gray-500 hover:text-gray-800">
+                  Cerrar
+                </button>
+              </div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortColumn(key);
+                    setSortOrder('asc');
+                    setActiveColumnFilter(null);
+                  }}
+                  className={`w-full rounded border px-3 py-2 text-left text-sm ${sortColumn === key && sortOrder === 'asc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
+                >
+                  {sortLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortColumn(key);
+                    setSortOrder('desc');
+                    setActiveColumnFilter(null);
+                  }}
+                  className={`w-full rounded border px-3 py-2 text-left text-sm ${sortColumn === key && sortOrder === 'desc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
+                >
+                  {reverseLabel}
+                </button>
+              </div>
+              <div className="mt-4">
+                <p className="text-sm font-semibold mb-2">Filtrar por valores</p>
+                <div className="max-h-44 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2">
+                  {columnOptions[key]?.length ? (
+                    columnOptions[key].map((option) => {
+                      const normalized = String(option);
+                      return (
+                        <label key={`${key}-${normalized}`} className="mb-1 flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={activeFilters[key]?.has(option)}
+                            onChange={() => toggleFilterOption(key, option)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                          />
+                          <span className="truncate">{normalized}</span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-gray-500">Sin valores para filtrar</p>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => clearFilterForColumn(key)}
+                    className="text-sm text-gray-600 hover:text-gray-900"
+                  >
+                    Limpiar filtros
+                  </button>
+                  <span className="text-xs text-gray-500">Toca fuera para cerrar</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </th>
+      );
+    };
+
+    const renderMobileFilterSheet = () => {
+      if (!activeColumnFilter) return null;
+      const activeColumn = filterableColumns.find((col) => col.key === activeColumnFilter);
+      const label = activeColumn?.label || 'Filtro';
+      const sortLabel = isNumericColumn(activeColumnFilter) ? 'Menor a Mayor' : 'A-Z';
+      const reverseLabel = isNumericColumn(activeColumnFilter) ? 'Mayor a Menor' : 'Z-A';
+
+      return (
+        <div className="fixed inset-0 z-40 bg-black/40 flex items-end md:hidden" onClick={() => setActiveColumnFilter(null)}>
+          <div className="w-full max-h-[88vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-lg font-semibold">{label}</p>
+                <p className="text-sm text-gray-500">Ordenar y filtrar</p>
+              </div>
+              <button type="button" onClick={() => setActiveColumnFilter(null)} className="text-sm font-semibold text-gray-700">
+                Cerrar
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-sm font-semibold">Orden</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortColumn(activeColumnFilter);
+                    setSortOrder('asc');
+                    setActiveColumnFilter(null);
+                  }}
+                  className={`w-full rounded-xl border px-4 py-3 text-left text-sm ${sortColumn === activeColumnFilter && sortOrder === 'asc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
+                >
+                  {sortLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortColumn(activeColumnFilter);
+                    setSortOrder('desc');
+                    setActiveColumnFilter(null);
+                  }}
+                  className={`w-full rounded-xl border px-4 py-3 text-left text-sm ${sortColumn === activeColumnFilter && sortOrder === 'desc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
+                >
+                  {reverseLabel}
+                </button>
+              </div>
+              <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-sm font-semibold">Filtrar por valores</p>
+                <div className="max-h-60 overflow-y-auto space-y-2">
+                  {columnOptions[activeColumnFilter]?.length ? (
+                    columnOptions[activeColumnFilter].map((option) => {
+                      const normalized = String(option);
+                      return (
+                        <label key={`mobile-${activeColumnFilter}-${normalized}`} className="flex cursor-pointer items-center gap-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={activeFilters[activeColumnFilter]?.has(option)}
+                            onChange={() => toggleFilterOption(activeColumnFilter, option)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                          />
+                          <span>{normalized}</span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-gray-500">Sin valores para filtrar</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => clearFilterForColumn(activeColumnFilter)}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Limpiar filtros
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     const handleEditVenta = (venta) => {
       setEditingVenta(venta);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1393,15 +1654,15 @@ const App = () => {
             <table className="w-full text-xs sm:text-sm">
               <thead className="bg-gray-100 sticky top-0">
                 <tr>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">N°</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Producto</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Cliente</th>
-                  <th className="p-2 md:p-3 text-left hidden lg:table-cell whitespace-nowrap">Canal</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Cant.</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">P. Unit.</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Total</th>
-                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Pagado</th>
+                  {renderHeaderCell({ key: 'numero', label: 'N°' })}
+                  {renderHeaderCell({ key: 'fecha', label: 'Fecha' })}
+                  {renderHeaderCell({ key: 'producto_nombre', label: 'Producto' })}
+                  {renderHeaderCell({ key: 'cliente', label: 'Cliente' })}
+                  {renderHeaderCell({ key: 'canal_venta', label: 'Canal', hiddenClass: 'hidden lg:table-cell' })}
+                  {renderHeaderCell({ key: 'cantidad', label: 'Cant.' })}
+                  {renderHeaderCell({ key: 'precio_unitario', label: 'P. Unit.' })}
+                  {renderHeaderCell({ key: 'total', label: 'Total' })}
+                  {renderHeaderCell({ key: 'pagado', label: 'Pagado' })}
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Eliminar</th>
                 </tr>
               </thead>
@@ -1434,7 +1695,7 @@ const App = () => {
                               try {
                                 await deleteVenta(v.id);
                                 alert('Venta eliminada exitosamente');
-                                loadVentas(selectedMonth, selectedYear);
+                                loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
                                 loadInventario();
                                 loadReporte();
                               } catch (error) {
@@ -1454,6 +1715,7 @@ const App = () => {
               </tbody>
             </table>
           </div>
+          {renderMobileFilterSheet()}
         </div>
       </div>
     );

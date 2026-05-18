@@ -31,6 +31,7 @@ const obtenerFechaLocal = () => {
 };
 
 const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const monthOptions = [{ label: 'Todo el año', value: null }, ...monthNames.map((label, index) => ({ label, value: index + 1 }))];
 
 // Componente independiente para formulario de ventas
 const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }) => {
@@ -549,9 +550,9 @@ const App = () => {
     }
   }, []);
 
-  const loadVentas = useCallback(async ({ mes = null, anio = null, ordering = null, filters = {} } = {}) => {
+  const loadVentas = useCallback(async ({ pageUrl = null, mes = null, anio = null, ordering = null, filters = {} } = {}) => {
     try {
-      const data = await fetchVentas({ mes, anio, ordering, filters });
+      const data = await fetchVentas({ pageUrl, mes, anio, ordering, filters });
       setVentas(Array.isArray(data) ? data : data.results ?? []);
     } catch (error) {
       console.error('Error:', error);
@@ -601,7 +602,7 @@ const App = () => {
     setAuth(true);
     // force a fresh data load after authentication
     loadProductos();
-    loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+    loadVentas({ mes: selectedMonth === null ? null : selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
@@ -611,7 +612,7 @@ const App = () => {
   useEffect(() => {
     if (!auth) return; // no intentar cargar si no está autenticado
     loadProductos();
-    loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+    loadVentas({ mes: selectedMonth === null ? null : selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
@@ -1322,8 +1323,10 @@ const App = () => {
   // Ventas Tab
   const VentasTab = () => {
     const [editingVenta, setEditingVenta] = useState(null);
+    const [ventasPage, setVentasPage] = useState({ results: [], next: null, previous: null, count: 0 });
+    const [ventasLoading, setVentasLoading] = useState(false);
 
-    const ventasArray = Array.isArray(ventas) ? ventas : ventas?.results ?? [];
+    const ventasArray = ventasPage.results || [];
     const filterableColumns = [
       { key: 'numero', label: 'N°' },
       { key: 'fecha', label: 'Fecha' },
@@ -1374,6 +1377,26 @@ const App = () => {
     const toggleColumnFilterMenu = (columnKey) => {
       setActiveColumnFilter((prev) => (prev === columnKey ? null : columnKey));
     };
+
+    const loadVentasPage = useCallback(async ({ pageUrl = null, mes = selectedMonth, anio = selectedYear, ordering = orderingValue, filters = appliedFilters } = {}) => {
+      setVentasLoading(true);
+      try {
+        const data = await fetchVentas({ pageUrl, mes: mes === null ? null : mes, anio, ordering, filters });
+        const results = Array.isArray(data) ? data : data.results ?? [];
+        const next = data.next || null;
+        const previous = data.previous || null;
+        const count = data.count ?? (Array.isArray(results) ? results.length : 0);
+        setVentasPage({ results, next, previous, count });
+      } catch (error) {
+        console.error('Error cargando página de ventas:', error);
+      } finally {
+        setVentasLoading(false);
+      }
+    }, [selectedMonth, selectedYear, orderingValue, appliedFilters]);
+
+    useEffect(() => {
+      loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+    }, [selectedMonth, selectedYear, orderingValue, appliedFilters, loadVentasPage]);
 
     const renderHeaderCell = ({ key, label, hiddenClass }) => {
       const selectedCount = activeFilters[key]?.size || 0;
@@ -1580,7 +1603,7 @@ const App = () => {
             initialVenta={editingVenta}
             onVentaRegistrada={() => {
               setEditingVenta(null);
-              loadVentas(selectedMonth, selectedYear);
+              loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
               loadInventario();
               loadReporte();
             }}
@@ -1593,7 +1616,7 @@ const App = () => {
               <div className="space-y-2">
                 <h3 className="text-lg md:text-xl font-bold">Historial de Ventas</h3>
                 <p className="text-sm text-gray-600">
-                  Ventas de <span className="font-semibold">{monthNames[selectedMonth - 1]}</span> <span className="font-semibold">{selectedYear}</span>
+                  Ventas de <span className="font-semibold">{selectedMonth === null ? 'Todo el año' : monthNames[selectedMonth - 1]}</span> <span className="font-semibold">{selectedYear}</span>
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1629,14 +1652,14 @@ const App = () => {
                 ref={monthNavRef}
                 className="flex w-full overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent"
               >
-                {monthNames.map((nombre, index) => (
+                {monthOptions.map(({ label, value }) => (
                   <button
-                    key={nombre}
+                    key={label}
                     type="button"
-                    onClick={() => setSelectedMonth(index + 1)}
-                    className={`min-w-[100px] flex-shrink-0 rounded-full px-3 py-2 text-sm font-semibold transition ${selectedMonth === index + 1 ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'}`}
+                    onClick={() => setSelectedMonth(value)}
+                    className={`min-w-[100px] shrink-0 rounded-full px-3 py-2 text-sm font-semibold transition ${selectedMonth === value ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'}`}
                   >
-                    {nombre}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -1667,7 +1690,7 @@ const App = () => {
                 </tr>
               </thead>
               <tbody>
-                {ventas.map((v) => (
+                {ventasArray.map((v) => (
                   <tr
                     key={v.id}
                     onClick={() => handleEditVenta(v)}
@@ -1695,7 +1718,7 @@ const App = () => {
                               try {
                                 await deleteVenta(v.id);
                                 alert('Venta eliminada exitosamente');
-                                loadVentas({ mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+                                loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
                                 loadInventario();
                                 loadReporte();
                               } catch (error) {
@@ -1716,6 +1739,29 @@ const App = () => {
             </table>
           </div>
           {renderMobileFilterSheet()}
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-600">
+              Mostrando {ventasArray.length} de {ventasPage.count} ventas
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => loadVentasPage({ pageUrl: ventasPage.previous })}
+                disabled={!ventasPage.previous || ventasLoading}
+                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              >
+                ← Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => loadVentasPage({ pageUrl: ventasPage.next })}
+                disabled={!ventasPage.next || ventasLoading}
+                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+              >
+                Siguiente →
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );

@@ -32,10 +32,10 @@ function Login({ onLogin }) {
           {/* Logo/Título */}
           <div className="text-center mb-8">
             <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-2">
-              Kaizen F&F
+              Portal de Acceso
             </h1>
             <p className="text-gray-600 text-sm">
-              Sistema de Gestión de Inventario
+              Sistema ERP para la gestión de tu empresa. Inicia sesión para continuar.
             </p>
           </div>
 
@@ -121,7 +121,7 @@ function Login({ onLogin }) {
           {/* Footer */}
           <div className="mt-8 pt-6 border-t border-gray-200 text-center">
             <p className="text-gray-600 text-xs">
-              © 2026 Kaizen F&F. Todos los derechos reservados.
+              © 2026 Sistema ERP. Todos los derechos reservados.
             </p>
           </div>
         </div>
@@ -129,6 +129,7 @@ function Login({ onLogin }) {
         {/* Información Adicional */}
         <div className="mt-6 text-center text-white text-sm">
           <p>¿Necesitas ayuda? Contacta al administrador</p>
+          <p>Puede tomar algunos minutos si accedes por primera vez</p>
         </div>
       </div>
     </div>

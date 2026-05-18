@@ -1,9 +1,13 @@
 import apiClient from './config';
 
-// Obtener todas las ventas
-export const fetchVentas = async () => {
+// Obtener todas las ventas con filtros opcionales por mes y año
+export const fetchVentas = async ({ mes = null, anio = null } = {}) => {
   try {
-    const response = await apiClient.get('/api/ventas/');
+    const params = {};
+    if (mes) params.mes = mes;
+    if (anio) params.anio = anio;
+
+    const response = await apiClient.get('/api/ventas/', { params });
     return response.data.results ?? response.data;
   } catch (error) {
     console.error('Error al obtener ventas:', error);

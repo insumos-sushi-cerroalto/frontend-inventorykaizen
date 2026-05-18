@@ -24,7 +24,7 @@ function Dashboard({ setAuth, productos, ventas, compras, inventario, reporte, a
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <h1 className="text-lg md:text-2xl font-bold flex-1 md:flex-initial">Sistema de Inventario - Kaizen F&F</h1>
+        <h1 className="text-lg md:text-2xl font-bold flex-1 md:flex-initial"> Sistema ERP </h1>
         <button 
           onClick={handleLogout}
           className="bg-red-500 hover:bg-red-600 text-white p-2 rounded transition"

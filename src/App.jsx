@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import ComprasPadre from './ComprasPadre';
 import { createVenta, updateVenta, deleteVenta, fetchVentas } from './api/ventas';
@@ -29,6 +29,8 @@ const obtenerFechaLocal = () => {
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 // Componente independiente para formulario de ventas
 const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }) => {
@@ -523,6 +525,10 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [auth, setAuth] = useState(isAuthenticated());
 
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const monthNavRef = useRef(null);
+
   const loadProductos = useCallback(async () => {
     try {
       const data = await fetchProductos();
@@ -532,9 +538,9 @@ const App = () => {
     }
   }, []);
 
-  const loadVentas = useCallback(async () => {
+  const loadVentas = useCallback(async (mes = null, anio = null) => {
     try {
-      const data = await fetchVentas();
+      const data = await fetchVentas({ mes, anio });
       setVentas(Array.isArray(data) ? data : data.results ?? []);
     } catch (error) {
       console.error('Error:', error);
@@ -573,21 +579,21 @@ const App = () => {
     setAuth(true);
     // force a fresh data load after authentication
     loadProductos();
-    loadVentas();
+    loadVentas(selectedMonth, selectedYear);
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte]);
+  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear]);
 
   // Cargar datos cuando el usuario está autenticado (al montar o al iniciar sesión)
   useEffect(() => {
     if (!auth) return; // no intentar cargar si no está autenticado
     loadProductos();
-    loadVentas();
+    loadVentas(selectedMonth, selectedYear);
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte]);
+  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear]);
 
   // Función helper para calcular la semana ISO con formato personalizado
   const getWeekInfo = (dateStr) => {
@@ -1313,7 +1319,7 @@ const App = () => {
             initialVenta={editingVenta}
             onVentaRegistrada={() => {
               setEditingVenta(null);
-              loadVentas();
+              loadVentas(selectedMonth, selectedYear);
               loadInventario();
               loadReporte();
             }}
@@ -1322,7 +1328,66 @@ const App = () => {
 
         <div className="bg-white rounded-lg shadow">
           <div className="p-4 md:p-6">
-            <h3 className="text-lg md:text-xl font-bold mb-4">Historial de Ventas</h3>
+            <div className="flex flex-col gap-4 md:gap-0 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-2">
+                <h3 className="text-lg md:text-xl font-bold">Historial de Ventas</h3>
+                <p className="text-sm text-gray-600">
+                  Ventas de <span className="font-semibold">{monthNames[selectedMonth - 1]}</span> <span className="font-semibold">{selectedYear}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedYear((prev) => prev - 1)}
+                  className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  title="Año anterior"
+                >
+                  ←
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedYear((prev) => prev + 1)}
+                  className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  title="Año siguiente"
+                >
+                  →
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => monthNavRef.current?.scrollBy({ left: -240, behavior: 'smooth' })}
+                className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded border border-gray-300 bg-white text-lg text-gray-700 hover:bg-gray-50"
+                title="Mover meses a la izquierda"
+              >
+                ‹
+              </button>
+              <div
+                ref={monthNavRef}
+                className="flex w-full overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent"
+              >
+                {monthNames.map((nombre, index) => (
+                  <button
+                    key={nombre}
+                    type="button"
+                    onClick={() => setSelectedMonth(index + 1)}
+                    className={`min-w-[100px] flex-shrink-0 rounded-full px-3 py-2 text-sm font-semibold transition ${selectedMonth === index + 1 ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'}`}
+                  >
+                    {nombre}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => monthNavRef.current?.scrollBy({ left: 240, behavior: 'smooth' })}
+                className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded border border-gray-300 bg-white text-lg text-gray-700 hover:bg-gray-50"
+                title="Mover meses a la derecha"
+              >
+                ›
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs sm:text-sm">
@@ -1369,7 +1434,7 @@ const App = () => {
                               try {
                                 await deleteVenta(v.id);
                                 alert('Venta eliminada exitosamente');
-                                loadVentas();
+                                loadVentas(selectedMonth, selectedYear);
                                 loadInventario();
                                 loadReporte();
                               } catch (error) {
@@ -1558,7 +1623,7 @@ const App = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <h1 className="text-lg md:text-2xl font-bold flex-1 md:flex-initial">Sistema de Inventario - Kaizen F&F</h1>
+        <h1 className="text-lg md:text-2xl font-bold flex-1 md:flex-initial">Sistema ERP</h1>
         <button 
           onClick={() => {
             logout();

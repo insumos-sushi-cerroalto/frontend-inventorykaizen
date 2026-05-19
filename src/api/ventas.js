@@ -26,6 +26,38 @@ export const fetchVentas = async ({ pageUrl = null, mes = null, anio = null, ord
   }
 };
 
+export const fetchAllVentas = async ({ mes = null, anio = null, ordering = null, filters = {} } = {}) => {
+  try {
+    const params = {};
+    if (mes) params.mes = mes;
+    if (anio) params.anio = anio;
+    if (ordering) params.ordering = ordering;
+    Object.entries(filters).forEach(([key, values]) => {
+      if (Array.isArray(values) && values.length > 0) {
+        params[key] = values.join(',');
+      }
+    });
+
+    let allResults = [];
+    let nextUrl = '/api/ventas/';
+    let firstRequest = true;
+
+    while (nextUrl) {
+      const response = await apiClient.get(nextUrl, firstRequest ? { params } : {});
+      const data = response.data;
+      const pageResults = Array.isArray(data) ? data : data.results ?? [];
+      allResults = allResults.concat(pageResults);
+      nextUrl = data.next || null;
+      firstRequest = false;
+    }
+
+    return allResults;
+  } catch (error) {
+    console.error('Error al obtener todas las ventas:', error);
+    throw error;
+  }
+};
+
 // Crear una nueva venta
 export const createVenta = async (ventaData) => {
   try {

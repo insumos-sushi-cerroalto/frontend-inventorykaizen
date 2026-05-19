@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import ComprasPadre from './ComprasPadre';
-import { createVenta, updateVenta, deleteVenta, fetchVentas } from './api/ventas';
+import { createVenta, updateVenta, deleteVenta, fetchVentas, fetchAllVentas } from './api/ventas';
 import { createCompra, fetchCompras } from './api/compras';
 import { createProducto, updateProducto, deleteProducto, fetchProductos } from './api/productos';
 import { fetchInventario, fetchReporteFinanciero } from './api/inventario';
@@ -550,9 +550,11 @@ const App = () => {
     }
   }, []);
 
-  const loadVentas = useCallback(async ({ pageUrl = null, mes = null, anio = null, ordering = null, filters = {} } = {}) => {
+  const loadVentas = useCallback(async ({ pageUrl = null, mes = null, anio = null, ordering = null, filters = {}, allPages = true } = {}) => {
     try {
-      const data = await fetchVentas({ pageUrl, mes, anio, ordering, filters });
+      const data = allPages
+        ? await fetchAllVentas({ mes, anio, ordering, filters })
+        : await fetchVentas({ pageUrl, mes, anio, ordering, filters });
       setVentas(Array.isArray(data) ? data : data.results ?? []);
     } catch (error) {
       console.error('Error:', error);
@@ -602,21 +604,21 @@ const App = () => {
     setAuth(true);
     // force a fresh data load after authentication
     loadProductos();
-    loadVentas({ mes: selectedMonth === null ? null : selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+    loadVentas({ ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear, orderingValue, appliedFilters]);
+  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, orderingValue, appliedFilters]);
 
   // Cargar datos cuando el usuario está autenticado (al montar o al iniciar sesión)
   useEffect(() => {
     if (!auth) return; // no intentar cargar si no está autenticado
     loadProductos();
-    loadVentas({ mes: selectedMonth === null ? null : selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
+    loadVentas({ ordering: orderingValue, filters: appliedFilters });
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, selectedMonth, selectedYear, orderingValue, appliedFilters]);
+  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, orderingValue, appliedFilters]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -1073,54 +1075,60 @@ const App = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white p-4 md:p-6 rounded-lg shadow">
+          <div className="bg-white p-4 md:p-6 rounded-lg shadow overflow-x-auto">
             <h3 className="text-lg md:text-xl font-bold mb-4">Ingresos por Día</h3>
             {ventasPorDia.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={ventasPorDia}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="fecha" angle={-45} textAnchor="end" height={80} />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="total" stroke="#0088FE" name="Ingresos ($)" />
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="min-w-[600px]">
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={ventasPorDia}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="fecha" angle={-45} textAnchor="end" height={80} />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="total" stroke="#0088FE" name="Ingresos ($)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             ) : (
               <p className="text-gray-500 text-center py-8">No hay datos</p>
             )}
           </div>
 
-          <div className="bg-white p-4 md:p-6 rounded-lg shadow">
+          <div className="bg-white p-4 md:p-6 rounded-lg shadow overflow-x-auto">
             <h3 className="text-lg md:text-xl font-bold mb-4">Ingresos por Semana</h3>
             {dataVentasProSemana.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dataVentasProSemana}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="semana" angle={-45} textAnchor="end" height={80} />
-                  <YAxis />
-                  <Tooltip formatter={(value) => `$${value}`} labelFormatter={(label) => `${label}`} />
-                  <Bar dataKey="total" fill="#00C49F" />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="min-w-[600px]">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dataVentasProSemana}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="semana" angle={-45} textAnchor="end" height={80} />
+                    <YAxis />
+                    <Tooltip formatter={(value) => `$${value}`} labelFormatter={(label) => `${label}`} />
+                    <Bar dataKey="total" fill="#00C49F" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             ) : (
               <p className="text-gray-500 text-center py-8">No hay datos</p>
             )}
           </div>
         </div>
 
-        <div className="bg-white p-4 md:p-6 rounded-lg shadow">
+        <div className="bg-white p-4 md:p-6 rounded-lg shadow overflow-x-auto">
           <h3 className="text-lg md:text-xl font-bold mb-4">Ingresos por Mes</h3>
           {dataVentasPorMes.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dataVentasPorMes}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mes" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="total" fill="#FFBB28" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="min-w-[600px]">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dataVentasPorMes}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="mes" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="total" fill="#FFBB28" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             <p className="text-gray-500 text-center py-8">No hay datos</p>
           )}

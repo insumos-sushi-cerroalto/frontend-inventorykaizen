@@ -41,6 +41,9 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
     valor_venta: ''
   });
 
+  const [productSearch, setProductSearch] = useState('');
+  const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+
   // Cargar compras padre
   const loadComprasPadre = useCallback(async () => {
     try {
@@ -77,6 +80,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
         costo_unitario: '',
         valor_venta: ''
       });
+      setProductSearch('');
+      setShowProductSuggestions(false);
     } else {
       alert('Por favor completa todos los campos del item');
     }
@@ -123,6 +128,14 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
       notas: '',
       compras_data: []
     });
+    setItemForm({
+      producto: '',
+      cantidad: '',
+      costo_unitario: '',
+      valor_venta: ''
+    });
+    setProductSearch('');
+    setShowProductSuggestions(false);
     setEditingId(null);
     setShowForm(false);
   };
@@ -142,6 +155,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
         proveedor: c.proveedor
       }))
     });
+    setProductSearch('');
+    setShowProductSuggestions(false);
     setShowForm(true);
   };
 
@@ -228,19 +243,43 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
               <h4 className="font-bold mb-4 text-sm md:text-base">Agregar Productos a la Compra</h4>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 md:gap-3 mb-3">
-                <div className="sm:col-span-2 md:col-span-1">
+                <div className="sm:col-span-2 md:col-span-1 relative">
                   <label className="block text-xs md:text-sm font-medium mb-1">Producto *</label>
-                  <select
-                    value={itemForm.producto}
-                    onChange={(e) => setItemForm({...itemForm, producto: e.target.value})}
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={(e) => {
+                      setProductSearch(e.target.value);
+                      setItemForm({ ...itemForm, producto: '' });
+                      setShowProductSuggestions(true);
+                    }}
                     className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+                    placeholder="Escribe para buscar..."
                     required
-                  >
-                    <option value="">Seleccionar</option>
-                    {productos.map(p => (
-                      <option key={p.id} value={p.id}>{p.nombre}</option>
-                    ))}
-                  </select>
+                  />
+                  {showProductSuggestions && productSearch && (
+                    <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-auto mt-1 shadow">
+                      {productos
+                        .filter(p => p.nombre.toLowerCase().includes(productSearch.toLowerCase()))
+                        .map(p => (
+                          <li
+                            key={p.id}
+                            className="px-2 py-1 hover:bg-gray-100 cursor-pointer text-xs md:text-sm"
+                            onClick={() => {
+                              setProductSearch(p.nombre);
+                              setItemForm({ 
+                                ...itemForm, 
+                                producto: p.id, 
+                                valor_venta: p.precio_venta ? p.precio_venta.toString() : (p.precio_unitario ? p.precio_unitario.toString() : '')
+                              });
+                              setShowProductSuggestions(false);
+                            }}
+                          >
+                            {p.nombre}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div>

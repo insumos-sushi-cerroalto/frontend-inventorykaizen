@@ -14,10 +14,22 @@ export const fetchComprasPadre = async () => {
 // Crear una nueva compra padre
 export const createCompraPadre = async (compraData) => {
   try {
-    const response = await apiClient.post('/api/compras-padre/', compraData);
+    let response;
+    // Soportar envío de archivos (FormData) si el frontend incluye factura/boleta
+    if (compraData instanceof FormData) {
+      response = await apiClient.post('/api/compras-padre/', compraData);
+    } else {
+      response = await apiClient.post('/api/compras-padre/', compraData);
+    }
     return response.data;
   } catch (error) {
-    console.error('Error al crear compra padre:', error);
+    console.error('Error al crear compra padre:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+      headers: error.response?.headers,
+      request: error.request,
+    });
     throw error;
   }
 };
@@ -25,10 +37,15 @@ export const createCompraPadre = async (compraData) => {
 // Actualizar una compra padre existente
 export const updateCompraPadre = async (id, compraData) => {
   try {
-    const response = await apiClient.put(`/api/compras-padre/${id}/`, compraData);
+    let response;
+    if (compraData instanceof FormData) {
+      response = await apiClient.put(`/api/compras-padre/${id}/`, compraData);
+    } else {
+      response = await apiClient.put(`/api/compras-padre/${id}/`, compraData);
+    }
     return response.data;
   } catch (error) {
-    console.error('Error al actualizar compra padre:', error);
+    console.error('Error al actualizar compra padre:', error.response?.data ?? error);
     throw error;
   }
 };

@@ -31,7 +31,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
     fecha: obtenerFechaLocal(),
     proveedor: '',
     notas: '',
-    compras_data: []
+    compras_data: [],
+    facturaFile: null
   });
 
   const [itemForm, setItemForm] = useState({
@@ -40,6 +41,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
     costo_unitario: '',
     valor_venta: ''
   });
+
+  const [facturaPreview, setFacturaPreview] = useState(null);
 
   const [productSearch, setProductSearch] = useState('');
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
@@ -96,7 +99,7 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
-    
+
     if (compraForm.compras_data.length === 0) {
       alert('Debes agregar al menos un producto a la compra');
       return;
@@ -104,19 +107,38 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
 
     setLoading(true);
     try {
-      if (editingId) {
-        await updateCompraPadre(editingId, compraForm);
+      // Si hay archivo adjunto, construir FormData
+      if (compraForm.facturaFile instanceof File) {
+        const formData = new FormData();
+        formData.append('fecha', compraForm.fecha);
+        formData.append('proveedor', compraForm.proveedor);
+        formData.append('notas', compraForm.notas || '');
+        formData.append('compras_data', JSON.stringify(compraForm.compras_data));
+        formData.append('factura', compraForm.facturaFile);
+
+        if (editingId) {
+          await updateCompraPadre(editingId, formData);
+        } else {
+          await createCompraPadre(formData);
+        }
       } else {
-        await createCompraPadre(compraForm);
+        // Enviar JSON sin archivo
+        const payload = { ...compraForm };
+        delete payload.facturaFile;
+        if (editingId) {
+          await updateCompraPadre(editingId, payload);
+        } else {
+          await createCompraPadre(payload);
+        }
       }
-      
+
       alert(editingId ? 'Compra actualizada exitosamente' : 'Compra registrada exitosamente');
       resetForm();
       loadComprasPadre();
       if (onCompraRegistrada) onCompraRegistrada();
     } catch (error) {
       console.error('Error:', error);
-      alert('Error al registrar/actualizar compra: ' + error.message);
+      alert('Error al registrar/actualizar compra: ' + (error.message || error));
     }
     setLoading(false);
   }, [compraForm, editingId]);
@@ -126,7 +148,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
       fecha: obtenerFechaLocal(),
       proveedor: '',
       notas: '',
-      compras_data: []
+      compras_data: [],
+      facturaFile: null
     });
     setItemForm({
       producto: '',
@@ -138,6 +161,7 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
     setShowProductSuggestions(false);
     setEditingId(null);
     setShowForm(false);
+    setFacturaPreview(null);
   };
 
   const handleEdit = (compra) => {
@@ -158,6 +182,8 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
     setProductSearch('');
     setShowProductSuggestions(false);
     setShowForm(true);
+    // Mostrar preview si ya existe factura en la compra
+    setFacturaPreview(compra.factura_url || compra.factura || null);
   };
 
   const handleDelete = useCallback(async (compraId) => {
@@ -236,6 +262,37 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
                   className="w-full border rounded px-3 py-2 text-xs md:text-sm"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs md:text-sm font-medium mb-1">Adjuntar factura/boleta</label>
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  setCompraForm({ ...compraForm, facturaFile: file });
+                  if (file) {
+                    if (file.type.startsWith('image/')) {
+                      setFacturaPreview(URL.createObjectURL(file));
+                    } else {
+                      setFacturaPreview(file.name);
+                    }
+                  } else {
+                    setFacturaPreview(null);
+                  }
+                }}
+                className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+              />
+              {facturaPreview && (
+                <div className="mt-2">
+                  {typeof facturaPreview === 'string' && facturaPreview.endsWith('.pdf') ? (
+                    <p className="text-xs text-gray-600">Archivo listo: {facturaPreview}</p>
+                  ) : (
+                    typeof facturaPreview === 'string' && <img src={facturaPreview} alt="preview" className="max-h-40 mt-2 border" />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Agregar items */}
@@ -389,84 +446,121 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
         {comprasPadre.length === 0 ? (
           <p className="text-gray-500">No hay compras registradas aún</p>
         ) : (
-          comprasPadre.map(compra => (
-            <div key={compra.id} className="bg-white rounded-lg shadow-md border-l-4 border-blue-500">
-              <div
-                className="p-3 md:p-4 cursor-pointer hover:bg-gray-50 transition"
-                onClick={() => setExpandedCompra(expandedCompra === compra.id ? null : compra.id)}
-              >
-                <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-base md:text-lg font-bold truncate">
-                      Compra #{compra.numero} - {compra.proveedor}
-                    </h4>
-                    <p className="text-xs md:text-sm text-gray-600 break-words">
-                      Fecha: {formatearFecha(compra.fecha)} |
-                      Productos: {compra.cantidad_productos}
-                    </p>
-                    <p className="text-base md:text-lg font-bold text-gray-600 mt-2">
-                      Gasto Total: ${compra.costo_total}
-                    </p>
-                    {compra.notas && (
-                      <p className="text-xs md:text-sm text-gray-500 mt-1 break-words">Notas: {compra.notas}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEdit(compra);
-                      }}
-                      className="bg-yellow-500 text-white px-2 md:px-3 py-2 rounded hover:bg-yellow-600 transition text-xs md:text-sm whitespace-nowrap"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(compra.id);
-                      }}
-                      className="bg-red-600 text-white px-2 md:px-3 py-2 rounded hover:bg-red-700 transition text-xs md:text-sm whitespace-nowrap"
-                      title="Eliminar compra"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-              </div>
+          comprasPadre.map(compra => {
+            const ventaTotal = (compra.compras || []).reduce((sum, it) => {
+              const v = Number(it.valor_venta) || 0;
+              const q = Number(it.cantidad) || 0;
+              return sum + v * q;
+            }, 0);
+            const gastoTotal = Number(compra.costo_total) || 0;
+            const margen = ventaTotal - gastoTotal;
 
-              {/* Detalles expandibles */}
-              {expandedCompra === compra.id && (
-                <div className="bg-gray-50 p-3 md:p-4 border-t">
-                  <h5 className="font-bold mb-3 text-sm md:text-base">Productos en esta compra:</h5>
-                  <div className="overflow-x-auto -mx-3 md:mx-0">
-                    <table className="w-full text-xs md:text-sm min-w-max md:min-w-0">
-                      <thead>
-                        <tr className="border-b bg-gray-100">
-                          <th className="text-left p-2 md:p-3">Producto</th>
-                          <th className="text-right p-2 md:p-3">Cant.</th>
-                          <th className="text-right p-2 md:p-3 hidden sm:table-cell">Costo Unit.</th>
-                          <th className="text-right p-2 md:p-3">Total</th>
-                          <th className="text-right p-2 md:p-3 hidden md:table-cell">V. Venta</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {compra.compras.map((item, index) => (
-                          <tr key={`compra-item-${item.id}`} className="border-b hover:bg-white">
-                            <td className="p-2 md:p-3">{item.producto_nombre}</td>
-                            <td className="text-right p-2 md:p-3">{item.cantidad}</td>
-                            <td className="text-right p-2 md:p-3 hidden sm:table-cell">${item.costo_unitario}</td>
-                            <td className="text-right p-2 md:p-3 font-semibold">${item.costo_total}</td>
-                            <td className="text-right p-2 md:p-3 hidden md:table-cell">${item.valor_venta}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+            return (
+              <div key={compra.id} className="bg-white rounded-lg shadow-md border-l-4 border-blue-500">
+                <div
+                  className="p-3 md:p-4 cursor-pointer hover:bg-gray-50 transition"
+                  onClick={() => setExpandedCompra(expandedCompra === compra.id ? null : compra.id)}
+                >
+                  <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-base md:text-lg font-bold truncate">
+                        Compra #{compra.numero} - {compra.proveedor}
+                      </h4>
+                      <p className="text-xs md:text-sm text-gray-600 break-words">
+                        Fecha: {formatearFecha(compra.fecha)} |
+                        Productos: {compra.cantidad_productos}
+                      </p>
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="px-2 py-1 rounded bg-red-50 text-red-700 font-semibold">
+                          Gasto Total: ${gastoTotal}
+                        </div>
+                        <div className="px-2 py-1 rounded bg-green-50 text-green-700 font-semibold">
+                          Venta Total: ${ventaTotal}
+                        </div>
+                        <div className="px-2 py-1 rounded bg-purple-50 text-purple-700 font-semibold">
+                          Margen de Ganancia: ${margen}
+                        </div>
+                      </div>
+                      {compra.notas && (
+                        <p className="text-xs md:text-sm text-gray-500 mt-1 break-words">Notas: {compra.notas}</p>
+                      )}
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(compra);
+                        }}
+                        className="bg-yellow-500 text-white px-2 md:px-3 py-2 rounded hover:bg-yellow-600 transition text-xs md:text-sm whitespace-nowrap"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(compra.id);
+                        }}
+                        className="bg-red-600 text-white px-2 md:px-3 py-2 rounded hover:bg-red-700 transition text-xs md:text-sm whitespace-nowrap"
+                        title="Eliminar compra"
+                      >
+                        🗑️
+                      </button>
+                      { (compra.factura_url || compra.factura) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const url = compra.factura_url || compra.factura;
+                            if (url) window.open(url, '_blank'); else alert('No hay archivo disponible');
+                          }}
+                          className="bg-indigo-600 text-white px-2 md:px-3 py-2 rounded hover:bg-indigo-700 transition text-xs md:text-sm whitespace-nowrap"
+                        >
+                          Ver factura
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
-          ))
+
+                {/* Detalles expandibles */}
+                {expandedCompra === compra.id && (
+                  <div className="bg-gray-50 p-3 md:p-4 border-t">
+                    <h5 className="font-bold mb-3 text-sm md:text-base">Productos en esta compra:</h5>
+                    <div className="overflow-x-auto -mx-3 md:mx-0">
+                      <table className="w-full text-xs md:text-sm min-w-max md:min-w-0">
+                        <thead>
+                          <tr className="border-b bg-gray-100">
+                            <th className="text-left p-2 md:p-3">Producto</th>
+                            <th className="text-right p-2 md:p-3">Cant.</th>
+                            <th className="text-right p-2 md:p-3 hidden sm:table-cell">Costo Unit.</th>
+                            <th className="text-right p-2 md:p-3">Costo Total</th>
+                            <th className="text-right p-2 md:p-3">V. Venta Unit.</th>
+                            <th className="text-right p-2 md:p-3">V. Venta Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {compra.compras.map((item, index) => {
+                            const unit = Number(item.valor_venta) || 0;
+                            const qty = Number(item.cantidad) || 0;
+                            const ventaTotalItem = unit * qty;
+                            return (
+                              <tr key={`compra-item-${item.id || index}`} className="border-b hover:bg-white">
+                                <td className="p-2 md:p-3">{item.producto_nombre}</td>
+                                <td className="text-right p-2 md:p-3">{item.cantidad}</td>
+                                <td className="text-right p-2 md:p-3 hidden sm:table-cell">${item.costo_unitario}</td>
+                                <td className="text-right p-2 md:p-3 font-semibold">${item.costo_total}</td>
+                                <td className="text-right p-2 md:p-3">${unit}</td>
+                                <td className="text-right p-2 md:p-3 font-semibold">${ventaTotalItem}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

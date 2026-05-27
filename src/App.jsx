@@ -2030,7 +2030,6 @@ const App = () => {
               <button
                 onClick={() => {
                   setActiveTab('dashboard');
-                  setSidebarOpen(false);
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'dashboard'
                   ? 'bg-blue-600 text-white shadow'
@@ -2042,7 +2041,6 @@ const App = () => {
               <button
                 onClick={() => {
                   setActiveTab('ventas');
-                  setSidebarOpen(false);
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'ventas'
                   ? 'bg-blue-600 text-white shadow'
@@ -2054,7 +2052,6 @@ const App = () => {
               <button
                 onClick={() => {
                   setActiveTab('compras');
-                  setSidebarOpen(false);
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'compras'
                   ? 'bg-blue-600 text-white shadow'
@@ -2066,7 +2063,6 @@ const App = () => {
               <button
                 onClick={() => {
                   setActiveTab('inventario');
-                  setSidebarOpen(false);
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'inventario'
                   ? 'bg-blue-600 text-white shadow'
@@ -2078,7 +2074,6 @@ const App = () => {
               <button
                 onClick={() => {
                   setActiveTab('productos');
-                  setSidebarOpen(false);
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'productos'
                   ? 'bg-blue-600 text-white shadow'
@@ -2102,7 +2097,6 @@ const App = () => {
                   <button
                     onClick={() => {
                       setActiveTab('ingresos');
-                      setSidebarOpen(false);
                     }}
                     className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
                   >
@@ -2111,7 +2105,6 @@ const App = () => {
                   <button
                     onClick={() => {
                       setActiveTab('gastos');
-                      setSidebarOpen(false);
                     }}
                     className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
                   >
@@ -2120,7 +2113,6 @@ const App = () => {
                   <button
                     onClick={() => {
                       setActiveTab('comparativa');
-                      setSidebarOpen(false);
                     }}
                     className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
                   >
@@ -2129,7 +2121,6 @@ const App = () => {
                   <button
                     onClick={() => {
                       setActiveTab('porpagar');
-                      setSidebarOpen(false);
                     }}
                     className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
                   >

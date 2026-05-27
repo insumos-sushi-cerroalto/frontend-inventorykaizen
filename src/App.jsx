@@ -524,6 +524,7 @@ const App = () => {
   const [inventario, setInventario] = useState([]);
   const [reporte, setReporte] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [analisisOpen, setAnalisisOpen] = useState(false);
   const [auth, setAuth] = useState(isAuthenticated());
 
   const [sortColumn, setSortColumn] = useState('');
@@ -875,24 +876,30 @@ const App = () => {
   
   // Dashboard
   const DashboardTab = () => {
-    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#A28BFE', '#FF6394', '#5DD4FF', '#FF9E30', '#62C78A'];
 
     const ventasArray = Array.isArray(ventas)
       ? ventas
       : ventas?.results ?? [];
 
-    // Clientes más frecuentes (Top 5)
-    const clientesFrecuentes = ventasArray.reduce((acc, v) => {
-      const cliente = v.cliente || 'Sin nombre';
-      const existing = acc.find(c => c.nombre === cliente);
-      if (existing) {
-        existing.compras += 1;
-        existing.total += parseFloat(v.total);
-      } else {
-        acc.push({ nombre: cliente, compras: 1, total: parseFloat(v.total) });
-      }
-      return acc;
-    }, [])
+    // Clientes más frecuentes (Top 5) excluyendo NN/nn anónimos
+    const clientesFrecuentes = ventasArray
+      .filter((v) => {
+        const clienteRaw = (v.cliente || '').toString().trim();
+        const clienteLower = clienteRaw.toLowerCase();
+        return clienteLower !== 'nn' && clienteLower !== 'ningún nombre' && clienteRaw !== '';
+      })
+      .reduce((acc, v) => {
+        const cliente = v.cliente || 'Sin nombre';
+        const existing = acc.find(c => c.nombre === cliente);
+        if (existing) {
+          existing.compras += 1;
+          existing.total += parseFloat(v.total) || 0;
+        } else {
+          acc.push({ nombre: cliente, compras: 1, total: parseFloat(v.total) || 0 });
+        }
+        return acc;
+      }, [])
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
@@ -900,6 +907,24 @@ const App = () => {
       name: c.nombre.substring(0, 15),
       value: c.total
     }));
+
+    const dataProductosMasGanancia = ventasArray
+      .reduce((acc, venta) => {
+        const nombre = venta.producto_nombre || `Producto ${venta.producto || ''}` || 'Sin producto';
+        const cantidad = parseFloat(venta.cantidad) || 0;
+        const precio = parseFloat(venta.precio_unitario) || 0;
+        const ingreso = cantidad * precio;
+        if (ingreso <= 0) return acc;
+        const existing = acc.find(item => item.nombre === nombre);
+        if (existing) {
+          existing.valor += ingreso;
+        } else {
+          acc.push({ nombre, valor: ingreso });
+        }
+        return acc;
+      }, [])
+      .sort((a, b) => b.valor - a.valor)
+      .slice(0, 10);
 
     return (
       <div className="p-4 md:p-6">
@@ -949,24 +974,53 @@ const App = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white p-4 md:p-6 rounded-lg shadow">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="bg-white p-4 md:p-6 rounded-lg shadow xl:col-span-1">
             <h3 className="text-lg md:text-xl font-bold mb-4">Top 5 Clientes</h3>
             {dataClientesTop5.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dataClientesTop5}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#0088FE" />
-                </BarChart>
+              <ResponsiveContainer width="100%" height={320}>
+                <PieChart>
+                  <Pie
+                    data={dataClientesTop5}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    fill="#0088FE"
+                    label={(entry) => `${entry.name}: ${Number(entry.value).toLocaleString()}`}
+                  >
+                    {dataClientesTop5.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Ingreso']} />
+                </PieChart>
               </ResponsiveContainer>
             ) : (
               <p className="text-gray-500 text-center py-8">No hay datos de ventas</p>
             )}
           </div>
 
+          <div className="bg-white p-4 md:p-6 rounded-lg shadow xl:col-span-2">
+            <h3 className="text-lg md:text-xl font-bold mb-4">Top 10 Productos por Ingreso</h3>
+            {dataProductosMasGanancia.length > 0 ? (
+              <ResponsiveContainer width="100%" height={420}>
+                <BarChart layout="vertical" data={dataProductosMasGanancia} margin={{ top: 10, right: 20, left: 20, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" tickFormatter={(value) => `$${Number(value).toLocaleString()}`} />
+                  <YAxis type="category" dataKey="nombre" width={190} tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Ingreso']} />
+                  <Bar dataKey="valor" fill="#0A84FF" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-gray-500 text-center py-8">No hay datos suficientes para mostrar productos</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           <div className="bg-white p-4 md:p-6 rounded-lg shadow">
             <h3 className="text-lg md:text-xl font-bold mb-4">Productos con Bajo Stock</h3>
             <div className="space-y-2 max-h-80 overflow-y-auto">
@@ -1928,27 +1982,29 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-blue-600 text-white p-4 flex justify-between items-center md:justify-start">
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="md:hidden p-2 rounded hover:bg-blue-700 transition"
-          title="Toggle Sidebar"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-        <h1 className="text-lg md:text-2xl font-bold flex-1 md:flex-initial">Sistema ERP</h1>
+    <div className="min-h-screen bg-slate-100">
+      <nav className="relative z-50 bg-slate-900 text-white p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="relative z-50 p-2 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 transition"
+            title="Toggle Sidebar"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="text-lg md:text-2xl font-bold">Sistema ERP</h1>
+        </div>
         <button 
           onClick={() => {
             logout();
             setAuth(false);
           }}
-          className="bg-red-500 hover:bg-red-600 text-white p-2 rounded transition"
+          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition"
           title="Cerrar sesión"
         >
-          🚪
+          Cerrar sesión
         </button>
       </nav>
 
@@ -1956,36 +2012,29 @@ const App = () => {
         {/* Overlay para móviles */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 md:hidden z-30"
+            className="fixed inset-0 bg-slate-900/10 md:hidden z-30 transition-opacity duration-200"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
         {/* Sidebar */}
         <aside
-          className={`fixed md:relative w-64 bg-white h-screen shadow-lg z-40 transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-            }`}
+          className={`fixed left-0 top-0 w-64 bg-slate-950 text-slate-100 h-screen shadow-2xl z-40 transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >
-          <div className="p-4 flex flex-col h-full">
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="md:hidden self-end mb-4 p-2 hover:bg-gray-100 rounded"
-              title="Close Sidebar"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
+          <div className="p-5 flex flex-col h-full">
+            <div className="mb-6">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500 mb-2">Kaizen ERP</p>
+              <h2 className="text-2xl font-bold">Panel de Control</h2>
+            </div>
             <nav className="space-y-2 flex-1">
               <button
                 onClick={() => {
                   setActiveTab('dashboard');
                   setSidebarOpen(false);
                 }}
-                className={`w-full text-left px-4 py-3 rounded mb-2 transition ${activeTab === 'dashboard'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-100'
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'dashboard'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
                   }`}
               >
                 📊 Dashboard
@@ -1995,9 +2044,9 @@ const App = () => {
                   setActiveTab('ventas');
                   setSidebarOpen(false);
                 }}
-                className={`w-full text-left px-4 py-3 rounded mb-2 transition ${activeTab === 'ventas'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-100'
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'ventas'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
                   }`}
               >
                 💰 Ventas
@@ -2007,9 +2056,9 @@ const App = () => {
                   setActiveTab('compras');
                   setSidebarOpen(false);
                 }}
-                className={`w-full text-left px-4 py-3 rounded mb-2 transition ${activeTab === 'compras'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-100'
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'compras'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
                   }`}
               >
                 🛒 Compras
@@ -2019,9 +2068,9 @@ const App = () => {
                   setActiveTab('inventario');
                   setSidebarOpen(false);
                 }}
-                className={`w-full text-left px-4 py-3 rounded mb-2 transition ${activeTab === 'inventario'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-100'
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'inventario'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
                   }`}
               >
                 📦 Inventario
@@ -2031,19 +2080,69 @@ const App = () => {
                   setActiveTab('productos');
                   setSidebarOpen(false);
                 }}
-                className={`w-full text-left px-4 py-3 rounded mb-2 transition ${activeTab === 'productos'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-100'
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'productos'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
                   }`}
               >
                 🏷️ Productos
               </button>
             </nav>
+
+            <div className="mt-4 pt-4 border-t border-slate-800">
+              <button
+                onClick={() => setAnalisisOpen(!analisisOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-slate-800 bg-slate-900 text-left text-slate-100 hover:bg-slate-800 transition"
+              >
+                <span>📈 Análisis</span>
+                <span className="text-sm">{analisisOpen ? '▲' : '▼'}</span>
+              </button>
+              {analisisOpen && (
+                <div className="mt-3 space-y-2 pl-2">
+                  <button
+                    onClick={() => {
+                      setActiveTab('ingresos');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
+                  >
+                    Ingresos
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('gastos');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
+                  >
+                    Gastos
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('comparativa');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
+                  >
+                    Comparativa: Ingresos vs Gastos
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('porpagar');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-2 rounded-lg bg-slate-900 text-slate-200 hover:bg-slate-800 transition"
+                  >
+                    Ventas Pendientes de Pago
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto w-full md:w-auto">
+        <main className={`flex-1 overflow-y-auto w-full transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-0'}`}>
           {activeTab === 'dashboard' && <DashboardTab />}
           {activeTab === 'ventas' && <VentasTab />}
           {activeTab === 'ingresos' && <IngresosTab />}

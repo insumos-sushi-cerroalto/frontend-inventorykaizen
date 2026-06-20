@@ -30,6 +30,58 @@ const obtenerFechaLocal = () => {
   return `${year}-${month}-${day}`;
 };
 
+const getItemMinimo = (item) => {
+  if (!item) return 5;
+  const candidates = [item.stock_minimo, item.minimo_stock, item.min_stock];
+  for (const value of candidates) {
+    if (value !== undefined && value !== null && !Number.isNaN(Number(value))) {
+      return Number(value);
+    }
+  }
+  return 5;
+};
+
+const getCategoriaProducto = (item) => {
+  if (!item) return 'Otros';
+  const raw = (item.categoria || item.category || item.tipo || item.producto_categoria || '').toString().toLowerCase();
+  const name = (item.producto_nombre || item.nombre || '').toString().toLowerCase();
+
+  if (raw) {
+    if (raw.includes('insumo') || raw.includes('envase') || raw.includes('aluminio') || raw.includes('alusa') || raw.includes('contenedor')) return 'Insumos / Envases';
+    if (raw.includes('materia') || raw.includes('alimento') || raw.includes('grano') || raw.includes('comida')) return 'Materia Prima / Alimentos';
+    if (raw.includes('final') || raw.includes('producto') || raw.includes('bandeja') || raw.includes('roll')) return 'Productos Finales';
+  }
+
+  if (name.match(/arroz|camarón|camaron|choclito|pollo|carne|queso|verdura|fruta|harina|azúcar|aceite|sal|salsa/)) return 'Materia Prima / Alimentos';
+  if (name.match(/envase|aluminio|alusa|contenedor|bolsa|papel|plástico|empaque/)) return 'Insumos / Envases';
+  if (name.match(/roll|bandeja|arrollado|combo|producto|postre|relleno/)) return 'Productos Finales';
+
+  return 'Otros';
+};
+
+const getStockStatus = (item) => {
+  const stock = Number(item?.stock_actual ?? item?.stock ?? 0);
+  const minimo = getItemMinimo(item);
+  if (stock <= 0) return 'sin_stock';
+  if (stock <= minimo) return 'bajo_stock';
+  return 'optimo';
+};
+
+const getStockStatusLabel = (status) => {
+  return status === 'sin_stock' ? 'Sin stock' : status === 'bajo_stock' ? 'Stock bajo' : 'Stock óptimo';
+};
+
+const getStockCardClass = (status) => {
+  if (status === 'sin_stock') return 'border-red-300 bg-red-50';
+  if (status === 'bajo_stock') return 'border-amber-300 bg-amber-50';
+  return 'border-emerald-300 bg-emerald-50';
+};
+
+const formatCurrency = (value) => {
+  const amount = Number(value) || 0;
+  return amount.toLocaleString('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 0 });
+};
+
 const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const monthOptions = [{ label: 'Todo el año', value: null }, ...monthNames.map((label, index) => ({ label, value: index + 1 }))];
 
@@ -526,6 +578,21 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [analisisOpen, setAnalisisOpen] = useState(false);
   const [auth, setAuth] = useState(isAuthenticated());
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventoryCategory, setInventoryCategory] = useState('all');
+  const [inventoryStatus, setInventoryStatus] = useState('all');
+  const [showUrgentOnly, setShowUrgentOnly] = useState(false);
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [adjustmentModalOpen, setAdjustmentModalOpen] = useState(false);
+  const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    productoId: null,
+    type: 'perdida',
+    cantidad: '',
+    stock_real: '',
+    comentario: ''
+  });
 
   const [sortColumn, setSortColumn] = useState('');
   const [sortOrder, setSortOrder] = useState('asc');
@@ -600,6 +667,219 @@ const App = () => {
     if (!sortColumn) return null;
     return sortOrder === 'desc' ? `-${sortColumn}` : sortColumn;
   }, [sortColumn, sortOrder]);
+
+  const inventoryItemsAll = useMemo(() => {
+    const items = Array.isArray(inventario) ? inventario : [];
+    return items.map((item) => {
+      const stock = Number(item.stock_actual ?? item.stock ?? 0);
+      const stock_minimo = getItemMinimo(item);
+      const stock_status = getStockStatus({ ...item, stock_actual: stock, stock_minimo });
+      const categoria = getCategoriaProducto(item);
+      return { ...item, stock_actual: stock, stock_minimo, stock_status, categoria };
+    });
+  }, [inventario]);
+
+  const inventoryItems = useMemo(() => {
+    return inventoryItemsAll.filter((item) => {
+      const searchMatch = item.producto_nombre?.toString().toLowerCase().includes(inventorySearch.toLowerCase());
+      const categoryMatch = inventoryCategory === 'all' || item.categoria === inventoryCategory;
+      const statusMatch = inventoryStatus === 'all' || item.stock_status === inventoryStatus;
+      const urgentMatch = !showUrgentOnly || item.stock_status !== 'optimo';
+      return searchMatch && categoryMatch && statusMatch && urgentMatch;
+    });
+  }, [inventoryItemsAll, inventorySearch, inventoryCategory, inventoryStatus, showUrgentOnly]);
+
+  const inventoryValueTotal = useMemo(() => {
+    return inventoryItemsAll.reduce((sum, item) => {
+      if (item.stock_actual > 0) {
+        const costo = Number(item.precio_compra_promedio ?? item.precio_unitario ?? item.precio ?? 0);
+        return sum + item.stock_actual * costo;
+      }
+      return sum;
+    }, 0);
+  }, [inventoryItemsAll]);
+
+  const inventoryAlertCount = useMemo(() => {
+    return inventoryItemsAll.filter(item => item.stock_status !== 'optimo').length;
+  }, [inventoryItemsAll]);
+
+  const getMovementsForItem = useCallback((item) => {
+    const key = item.producto ?? item.id ?? item.producto_id;
+    const name = item.producto_nombre?.toString().toLowerCase();
+    const movimientos = [];
+
+    const addCompra = (compra, detalle) => {
+      if (!detalle) return;
+      const productId = detalle.producto ?? detalle.producto_id;
+      const productName = detalle.producto_nombre?.toString().toLowerCase();
+      if (String(productId) === String(key) || (name && productName === name)) {
+        movimientos.push({
+          fecha: compra.fecha || compra.created_at || compra.updated_at || obtenerFechaLocal(),
+          tipo: 'Compra',
+          cantidad: Number(detalle.cantidad) || 0,
+          total: Number(detalle.costo_unitario) * Number(detalle.cantidad) || 0,
+          referencia: compra.proveedor || detalle.proveedor || 'Proveedor no definido',
+        });
+      }
+    };
+
+    const addVenta = (venta) => {
+      const productId = venta.producto ?? venta.producto_id;
+      const productName = venta.producto_nombre?.toString().toLowerCase();
+      if (String(productId) === String(key) || (name && productName === name)) {
+        movimientos.push({
+          fecha: venta.fecha || venta.created_at || venta.updated_at || obtenerFechaLocal(),
+          tipo: 'Venta',
+          cantidad: -(Number(venta.cantidad) || 0),
+          total: Number(venta.precio_unitario) * Number(venta.cantidad) || 0,
+          referencia: venta.cliente || 'Cliente no definido',
+        });
+      }
+    };
+
+    const addAdjustment = (adj) => {
+      if (String(adj.productoId) === String(key) || (name && adj.productoNombre?.toLowerCase() === name)) {
+        const cantidad = adj.type === 'perdida'
+          ? -Math.abs(Number(adj.cantidad) || 0)
+          : Number(adj.stockDespues) - Number(adj.stockAntes);
+        movimientos.push({
+          fecha: adj.fecha,
+          tipo: adj.type === 'perdida' ? 'Pérdida' : 'Ajuste auditoría',
+          cantidad,
+          total: 0,
+          referencia: adj.comentario || 'Ajuste de inventario',
+        });
+      }
+    };
+
+    compras.forEach((compra) => {
+      const detalles = Array.isArray(compra.compras_data) ? compra.compras_data : Array.isArray(compra.compras) ? compra.compras : [compra];
+      detalles.forEach((detalle) => addCompra(compra, detalle));
+    });
+
+    ventas.forEach(addVenta);
+    inventoryAdjustments.forEach(addAdjustment);
+
+    return movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  }, [compras, ventas, inventoryAdjustments]);
+
+  const getProviderForItem = useCallback((item) => {
+    if (!item) return 'N/D';
+    if (item.proveedor) return item.proveedor;
+    const providers = {};
+    compras.forEach((compra) => {
+      const detalles = Array.isArray(compra.compras_data) ? compra.compras_data : Array.isArray(compra.compras) ? compra.compras : [compra];
+      detalles.forEach((detalle) => {
+        const productId = detalle.producto ?? detalle.producto_id;
+        const itemKey = item.producto ?? item.id ?? item.producto_id;
+        if (String(productId) === String(itemKey) || String(detalle.producto_nombre)?.toLowerCase() === String(item.producto_nombre)?.toLowerCase()) {
+          const proveedor = compra.proveedor || detalle.proveedor || 'N/D';
+          providers[proveedor] = (providers[proveedor] || 0) + 1;
+        }
+      });
+    });
+    return Object.entries(providers).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/D';
+  }, [compras]);
+
+  const handleOpenDetail = (item) => {
+    setSelectedInventoryItem(item);
+    setDetailModalOpen(true);
+  };
+
+  const handleOpenAdjustment = (item = null) => {
+    setSelectedInventoryItem(item);
+    setAdjustmentForm({
+      productoId: item?.producto ?? item?.id ?? null,
+      type: 'perdida',
+      cantidad: '',
+      stock_real: item ? String(item.stock_actual) : '',
+      comentario: ''
+    });
+    setAdjustmentModalOpen(true);
+  };
+
+  const handleSubmitAdjustment = useCallback((e) => {
+    e.preventDefault();
+    const selectedProductoId = adjustmentForm.productoId;
+    const item = inventoryItemsAll.find((inv) => String(inv.producto ?? inv.id ?? inv.producto_id) === String(selectedProductoId));
+    if (!item) {
+      alert('Selecciona un producto válido para registrar el ajuste.');
+      return;
+    }
+
+    const cantidad = Number(adjustmentForm.cantidad) || 0;
+    const stock_real = Number(adjustmentForm.stock_real);
+    const beforeStock = Number(item.stock_actual || 0);
+    let afterStock = beforeStock;
+    let cantidadMovimiento = 0;
+
+    if (adjustmentForm.type === 'perdida') {
+      afterStock = beforeStock - Math.abs(cantidad);
+      cantidadMovimiento = -Math.abs(cantidad);
+    } else {
+      afterStock = stock_real;
+      cantidadMovimiento = stock_real - beforeStock;
+    }
+
+    setInventario((prevInventario) => prevInventario.map((inv) => {
+      const invKey = String(inv.producto ?? inv.id ?? inv.producto_id);
+      const selectedKey = String(item.producto ?? item.id ?? item.producto_id);
+      if (invKey === selectedKey) {
+        return { ...inv, stock_actual: afterStock };
+      }
+      return inv;
+    }));
+
+    setInventoryAdjustments((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        productoId: item.producto ?? item.id ?? item.producto_id,
+        productoNombre: item.producto_nombre || item.nombre || 'Sin nombre',
+        fecha: obtenerFechaLocal(),
+        type: adjustmentForm.type,
+        cantidad: adjustmentForm.type === 'perdida' ? Math.abs(cantidad) : cantidadMovimiento,
+        stockAntes: beforeStock,
+        stockDespues: afterStock,
+        comentario: adjustmentForm.comentario || (adjustmentForm.type === 'perdida' ? 'Pérdida registrada' : 'Ajuste de auditoría')
+      }
+    ]);
+
+    setAdjustmentModalOpen(false);
+    setDetailModalOpen(false);
+  }, [adjustmentForm, inventoryItemsAll]);
+
+  const handleCloseAdjustment = () => {
+    setAdjustmentModalOpen(false);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailModalOpen(false);
+    setSelectedInventoryItem(null);
+  };
+
+  const handleInventorySearchChange = (value) => {
+    setInventorySearch(value);
+  };
+
+  const handleCategoryChange = (value) => {
+    setInventoryCategory(value);
+  };
+
+  const handleStatusChange = (value) => {
+    setInventoryStatus(value);
+  };
+
+  const providerForSelected = selectedInventoryItem ? getProviderForItem(selectedInventoryItem) : 'N/D';
+
+  const handleAdjustmentProductChange = (value) => {
+    const item = inventoryItemsAll.find((inv) => String(inv.producto ?? inv.id ?? inv.producto_id) === String(value));
+    setAdjustmentForm((prev) => ({
+      ...prev,
+      productoId: value,
+      stock_real: item ? String(item.stock_actual) : prev.stock_real
+    }));
+  };
 
   const handleLogin = useCallback(() => {
     setAuth(true);
@@ -1847,30 +2127,381 @@ const App = () => {
   // Inventario Tab
   const InventarioTab = () => (
     <div className="p-4 md:p-6">
-      <h2 className="text-2xl md:text-3xl font-bold mb-4 md:mb-6">Inventario Actual</h2>
-
-      <div className="bg-white p-4 md:p-6 rounded-lg shadow">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-          {inventario.map((item, idx) => (
-            <div key={idx} className="border rounded-lg p-3 md:p-4 hover:shadow-lg transition">
-              <h4 className="font-bold text-base md:text-lg mb-2">{item.producto_nombre}</h4>
-              <div className="space-y-1 text-xs md:text-sm">
-                <p>
-                  <span className="font-semibold">Stock:</span>{' '}
-                  <span className={`font-bold ${item.stock_actual < 5 ? 'text-red-600' : 'text-green-600'}`}>
-                    {item.stock_actual}
-                  </span>
-                </p>
-                <p className="text-gray-600">Compras: {item.total_compras}</p>
-                <p className="text-gray-600">Ventas: {item.total_ventas}</p>
-              </div>
-            </div>
-          ))}
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold">Inventario Actual</h2>
+          <p className="text-sm text-slate-600 mt-1">Revisa stock, alertas y movimientos por producto.</p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            type="button"
+            onClick={() => handleOpenAdjustment()}
+            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition"
+          >
+            Registrar Ajuste de Inventario
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowUrgentOnly((prev) => !prev)}
+            className={`px-4 py-2 rounded border transition ${showUrgentOnly ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-300 hover:bg-slate-50'}`}
+          >
+            {showUrgentOnly ? 'Ver todos' : 'Por Agotar'}
+          </button>
         </div>
       </div>
-    </div>
-  );
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2">Valor Total del Inventario</h3>
+          <p className="text-2xl font-bold">{formatCurrency(inventoryValueTotal)}</p>
+          <p className="text-xs text-slate-500 mt-2">Ignora productos con stock negativo.</p>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2">Productos en Alerta</h3>
+          <p className="text-2xl font-bold">{inventoryAlertCount}</p>
+          <p className="text-xs text-slate-500 mt-2">Sin stock o bajo el mínimo.</p>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2">Total productos</h3>
+          <p className="text-2xl font-bold">{inventoryItemsAll.length}</p>
+          <p className="text-xs text-slate-500 mt-2">Incluye todos los productos cargados.</p>
+        </div>
+      </div>
+
+      <div className="bg-white p-4 rounded-lg shadow mb-6">
+        <div className="grid gap-3 lg:grid-cols-4">
+          <div className="col-span-1">
+            <label className="block text-xs font-semibold mb-2">Buscar</label>
+            <input
+              type="text"
+              value={inventorySearch}
+              onChange={(e) => handleInventorySearchChange(e.target.value)}
+              placeholder="Buscar por nombre..."
+              className="w-full border rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs font-semibold mb-2">Categoría</label>
+            <select
+              value={inventoryCategory}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm"
+            >
+              <option value="all">Todas</option>
+              <option value="Insumos / Envases">Insumos / Envases</option>
+              <option value="Materia Prima / Alimentos">Materia Prima / Alimentos</option>
+              <option value="Productos Finales">Productos Finales</option>
+              <option value="Otros">Otros</option>
+            </select>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs font-semibold mb-2">Estado</label>
+            <select
+              value={inventoryStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm"
+            >
+              <option value="all">Todos</option>
+              <option value="sin_stock">Sin stock</option>
+              <option value="bajo_stock">Stock bajo</option>
+              <option value="optimo">Stock óptimo</option>
+            </select>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs font-semibold mb-2">Urgentes</label>
+            <div className="flex items-center gap-2">
+              <input
+                id="urgent-only"
+                type="checkbox"
+                checked={showUrgentOnly}
+                onChange={() => setShowUrgentOnly((prev) => !prev)}
+                className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+              />
+              <label htmlFor="urgent-only" className="text-sm text-slate-700">Mostrar por agotar</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {inventoryItems.length > 0 ? inventoryItems.map((item, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => handleOpenDetail(item)}
+            className={`text-left rounded-2xl p-5 border shadow-sm transition hover:shadow-lg ${getStockCardClass(item.stock_status)}`}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{item.categoria}</p>
+                <h3 className="text-lg font-bold mt-2">{item.producto_nombre || item.nombre}</h3>
+              </div>
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${item.stock_status === 'sin_stock' ? 'bg-red-500 text-white' : item.stock_status === 'bajo_stock' ? 'bg-amber-500 text-slate-950' : 'bg-emerald-500 text-white'}`}>
+                {getStockStatusLabel(item.stock_status)}
+              </span>
+            </div>
+
+            <div className="space-y-3 text-sm text-slate-700">
+              <p><span className="font-semibold">Stock:</span> {item.stock_actual}</p>
+              <p><span className="font-semibold">Mínimo:</span> {item.stock_minimo ?? 'N/D'}</p>
+              <p><span className="font-semibold">Proveedor:</span> {getProviderForItem(item)}</p>
+              <p><span className="font-semibold">Compras:</span> {item.total_compras ?? 'n/a'}</p>
+              <p><span className="font-semibold">Ventas:</span> {item.total_ventas ?? 'n/a'}</p>
+            </div>
+          </button>
+        )) : (
+          <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+            No hay productos que coincidan con los filtros.
+          </div>
+        )}
+      </div>
+
+      {detailModalOpen && selectedInventoryItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-xl font-bold">Detalle de {selectedInventoryItem.producto_nombre || selectedInventoryItem.nombre}</h3>
+                <p className="text-sm text-slate-500">Historial completo, costos y proveedores asociados.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseDetail}
+                className="rounded-full border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-100"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-6 lg:grid-cols-2">
+              <div className="space-y-4">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Resumen</p>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">Stock actual</p>
+                      <p className="mt-2 text-2xl font-bold">{selectedInventoryItem.stock_actual}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">Proveedor principal</p>
+                      <p className="mt-2 text-base font-semibold">{providerForSelected}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">Precio de compra promedio</p>
+                      <p className="mt-2 text-base font-semibold">{formatCurrency(selectedInventoryItem.precio_compra_promedio ?? selectedInventoryItem.precio_unitario ?? selectedInventoryItem.precio ?? 0)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">Último precio de venta</p>
+                      <p className="mt-2 text-base font-semibold">{formatCurrency((() => {
+                        const movimientos = getMovementsForItem(selectedInventoryItem).filter(m => m.tipo === 'Venta');
+                        return movimientos.length > 0 ? movimientos[0].total / Math.max(1, Math.abs(movimientos[0].cantidad)) : selectedInventoryItem.precio_unitario ?? 0;
+                      })())}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <h4 className="text-sm font-semibold text-slate-700 mb-3">Costos y márgenes</h4>
+                  {(() => {
+                    const movimientos = getMovementsForItem(selectedInventoryItem);
+                    const comprasProducto = movimientos.filter(m => m.tipo === 'Compra');
+                    const ventasProducto = movimientos.filter(m => m.tipo === 'Venta');
+                    const totalComprasProducto = comprasProducto.reduce((sum, item) => sum + item.total, 0);
+                    const totalCantCompras = comprasProducto.reduce((sum, item) => sum + item.cantidad, 0);
+                    const compraPromedio = totalCantCompras > 0 ? totalComprasProducto / totalCantCompras : Number(selectedInventoryItem.precio_unitario ?? 0);
+                    const totalVentasProducto = ventasProducto.reduce((sum, item) => sum + Math.abs(item.total), 0);
+                    const margen = totalVentasProducto - totalComprasProducto;
+
+                    return (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl bg-white p-4 shadow-sm">
+                          <p className="text-xs text-slate-500">PPP estimado</p>
+                          <p className="mt-2 text-base font-semibold">{formatCurrency(compraPromedio)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white p-4 shadow-sm">
+                          <p className="text-xs text-slate-500">Total ingresos</p>
+                          <p className="mt-2 text-base font-semibold">{formatCurrency(totalVentasProducto)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white p-4 shadow-sm">
+                          <p className="text-xs text-slate-500">Total gastos</p>
+                          <p className="mt-2 text-base font-semibold">{formatCurrency(totalComprasProducto)}</p>
+                        </div>
+                        <div className="rounded-2xl bg-white p-4 shadow-sm">
+                          <p className="text-xs text-slate-500">Margen</p>
+                          <p className={`mt-2 text-base font-semibold ${margen >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(margen)}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-700">Historial de Movimientos (Kardex)</h4>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAdjustment(selectedInventoryItem)}
+                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
+                    >
+                      Registrar ajuste
+                    </button>
+                  </div>
+                  <div className="max-h-96 overflow-auto rounded-3xl border border-slate-200 bg-white">
+                    <table className="min-w-full text-left text-sm text-slate-700">
+                      <thead className="bg-slate-100 text-xs uppercase tracking-[0.24em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Fecha</th>
+                          <th className="px-4 py-3">Tipo</th>
+                          <th className="px-4 py-3">Cantidad</th>
+                          <th className="px-4 py-3">Referencia</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {getMovementsForItem(selectedInventoryItem).map((mov, index) => (
+                          <tr key={index} className="border-t border-slate-200">
+                            <td className="px-4 py-3 text-xs md:text-sm">{mov.fecha}</td>
+                            <td className="px-4 py-3 text-xs md:text-sm font-semibold">{mov.tipo}</td>
+                            <td className={`px-4 py-3 text-xs md:text-sm font-semibold ${mov.cantidad < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{mov.cantidad}</td>
+                            <td className="px-4 py-3 text-xs md:text-sm">{mov.referencia}</td>
+                          </tr>
+                        ))}
+                        {getMovementsForItem(selectedInventoryItem).length === 0 && (
+                          <tr>
+                            <td colSpan="4" className="px-4 py-6 text-center text-sm text-slate-500">No hay movimientos registrados para este producto.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div> 
+       )}
+      
+      {adjustmentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-xl font-bold">Registrar Ajuste de Inventario</h3>
+                <p className="text-sm text-slate-500">Registra pérdidas o ajustes de conteo físico.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseAdjustment}
+                className="rounded-full border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-100"
+              >
+                Cerrar
+              </button>
+            </div>
+            <form onSubmit={handleSubmitAdjustment} className="space-y-6 p-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-2">Producto</label>
+                  <select
+                    value={adjustmentForm.productoId ?? ''}
+                    onChange={(e) => handleAdjustmentProductChange(e.target.value)}
+                    className="w-full border rounded px-3 py-2 text-sm"
+                    required
+                  >
+                    <option value="">Seleccionar producto</option>
+                    {inventoryItemsAll.map((item) => (
+                      <option key={item.producto ?? item.id ?? item.producto_id} value={item.producto ?? item.id ?? item.producto_id}>
+                        {item.producto_nombre || item.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-2">Tipo de ajuste</label>
+                  <select
+                    value={adjustmentForm.type}
+                    onChange={(e) => setAdjustmentForm((prev) => ({ ...prev, type: e.target.value }))}
+                    className="w-full border rounded px-3 py-2 text-sm"
+                  >
+                    <option value="perdida">Pérdida (vencido, dañado)</option>
+                    <option value="auditoria">Inventario físico (auditoría)</option>
+                  </select>
+                </div>
+              </div>
+
+              {adjustmentForm.type === 'perdida' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-2">Cantidad a restar</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={adjustmentForm.cantidad}
+                    onChange={(e) => setAdjustmentForm((prev) => ({ ...prev, cantidad: e.target.value }))}
+                    className="w-full border rounded px-3 py-2 text-sm"
+                    placeholder="Ej. 2"
+                    required
+                  />
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-2">Stock real</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={adjustmentForm.stock_real}
+                      onChange={(e) => setAdjustmentForm((prev) => ({ ...prev, stock_real: e.target.value }))}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                      placeholder="Ej. 18"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-2">Diferencia</label>
+                    <div className="rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      {adjustmentForm.productoId ? (() => {
+                        const item = inventoryItemsAll.find((inv) => String(inv.producto ?? inv.id ?? inv.producto_id) === String(adjustmentForm.productoId));
+                        const current = item ? Number(item.stock_actual || 0) : 0;
+                        const real = Number(adjustmentForm.stock_real) || 0;
+                        return real - current;
+                      })() : 0}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-2">Comentario</label>
+                <textarea
+                  value={adjustmentForm.comentario}
+                  onChange={(e) => setAdjustmentForm((prev) => ({ ...prev, comentario: e.target.value }))}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  rows="3"
+                  placeholder="Motivo del ajuste"
+                />
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseAdjustment}
+                  className="rounded-xl border border-slate-300 bg-white px-5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  Guardar Ajuste
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 
 
   // Productos Tab
@@ -1899,13 +2530,14 @@ const App = () => {
         }
       }
     };
-
+    
     return (
       <div className="p-4 md:p-6">
         <h2 className="text-2xl md:text-3xl font-bold mb-4 md:mb-6">Gestión de Productos</h2>
 
         <div className="bg-white p-4 md:p-6 rounded-lg shadow mb-6">
-          <h3 className="text-lg md:text-xl font-bold mb-4">{editingProducto ? 'Editar Producto' : 'Agregar Nuevo Producto'}</h3>
+          <h3 className="text-lg md:text-xl font-bold mb-4">
+            {editingProducto ? 'Editar Producto' : 'Agregar Nuevo Producto'}</h3>
           {editingProducto && (
             <button
               onClick={() => setEditingProducto(null)}

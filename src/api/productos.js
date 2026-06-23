@@ -1,6 +1,40 @@
 // src/api/productos.js
 import apiClient from './config';
 
+const normalizeProductoPayload = (productoData) => {
+  const normalized = { ...productoData };
+
+  if (normalized.producto_base === '') normalized.producto_base = null;
+  if (normalized.precio_unitario === '') normalized.precio_unitario = null;
+  if (normalized.factor_conversion === '' || normalized.factor_conversion === null || normalized.factor_conversion === undefined) {
+    normalized.factor_conversion = 1;
+  }
+
+  return normalized;
+};
+
+const buildProductoRequest = (productoData) => {
+  const normalized = normalizeProductoPayload(productoData);
+
+  if (!normalized.imagen) {
+    delete normalized.imagen;
+    const data = normalized;
+    return { data, headers: {} };
+  }
+
+  const formData = new FormData();
+  Object.entries(normalized).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      formData.append(key, value);
+    }
+  });
+
+  return {
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' }
+  };
+};
+
 // Obtener todos los productos
 export const fetchProductos = async () => {
   try {
@@ -15,18 +49,7 @@ export const fetchProductos = async () => {
 // Crear un nuevo producto
 export const createProducto = async (productoData) => {
   try {
-    let data = productoData;
-    let headers = {};
-    if (productoData.imagen) {
-      const formData = new FormData();
-      for (const key in productoData) {
-        if (productoData[key] !== null && productoData[key] !== undefined) {
-          formData.append(key, productoData[key]);
-        }
-      }
-      data = formData;
-      headers['Content-Type'] = 'multipart/form-data';
-    }
+    const { data, headers } = buildProductoRequest(productoData);
     const response = await apiClient.post('/api/productos/', data, { headers });
     return response.data;
   } catch (error) {
@@ -38,19 +61,8 @@ export const createProducto = async (productoData) => {
 // Actualizar un producto existente
 export const updateProducto = async (id, productoData) => {
   try {
-    let data = productoData;
-    let headers = {};
-    if (productoData.imagen) {
-      const formData = new FormData();
-      for (const key in productoData) {
-        if (productoData[key] !== null && productoData[key] !== undefined) {
-          formData.append(key, productoData[key]);
-        }
-      }
-      data = formData;
-      headers['Content-Type'] = 'multipart/form-data';
-    }
-    const response = await apiClient.put(`/api/productos/${id}/`, data, { headers });
+    const { data, headers } = buildProductoRequest(productoData);
+    const response = await apiClient.patch(`/api/productos/${id}/`, data, { headers });
     return response.data;
   } catch (error) {
     console.error('Error al actualizar producto:', error);

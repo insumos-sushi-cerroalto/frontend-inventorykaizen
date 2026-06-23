@@ -5,7 +5,7 @@ import apiClient from './config';
 export const fetchInventario = async () => {
   try {
     const response = await apiClient.get('/api/inventario/');
-    return response.data;
+    return response.data.results ?? response.data;
   } catch (error) {
     console.error('Error al obtener inventario:', error);
     throw error;

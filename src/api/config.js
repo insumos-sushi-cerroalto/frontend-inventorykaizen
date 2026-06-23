@@ -1,4 +1,4 @@
-// src/api/config.js
+// src/api/config.js 
 import axios from 'axios';
 
 // Si VITE_API_URL no existe, usará la de producción por defecto

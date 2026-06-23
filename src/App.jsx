@@ -43,13 +43,15 @@ const getItemMinimo = (item) => {
 
 const getCategoriaProducto = (item) => {
   if (!item) return 'Otros';
-  const raw = (item.categoria || item.category || item.tipo || item.producto_categoria || '').toString().toLowerCase();
+  const rawValue = (item.categoria || item.category || item.tipo || item.producto_categoria || '').toString().trim();
+  const raw = rawValue.toLowerCase();
   const name = (item.producto_nombre || item.nombre || '').toString().toLowerCase();
 
   if (raw) {
     if (raw.includes('insumo') || raw.includes('envase') || raw.includes('aluminio') || raw.includes('alusa') || raw.includes('contenedor')) return 'Insumos / Envases';
     if (raw.includes('materia') || raw.includes('alimento') || raw.includes('grano') || raw.includes('comida')) return 'Materia Prima / Alimentos';
     if (raw.includes('final') || raw.includes('producto') || raw.includes('bandeja') || raw.includes('roll')) return 'Productos Finales';
+    return rawValue;
   }
 
   if (name.match(/arroz|camarón|camaron|choclito|pollo|carne|queso|verdura|fruta|harina|azúcar|aceite|sal|salsa/)) return 'Materia Prima / Alimentos';
@@ -85,8 +87,25 @@ const formatCurrency = (value) => {
 const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const monthOptions = [{ label: 'Todo el año', value: null }, ...monthNames.map((label, index) => ({ label, value: index + 1 }))];
 
+const getProductoBaseId = (producto) => producto?.producto_base ?? producto?.producto_base_id ?? producto?.id;
+
+const getProductoFactorConversion = (producto) => {
+  const factor = Number(producto?.factor_conversion);
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+};
+
+const getProductoLabel = (producto) => {
+  if (!producto) return 'Producto no definido';
+  const partes = [producto.nombre];
+  if (producto.marca) partes.push(producto.marca);
+  if (producto.producto_base_nombre) partes.push(`base: ${producto.producto_base_nombre}`);
+  const factor = getProductoFactorConversion(producto);
+  if (factor !== 1) partes.push(`${factor} ${producto.unidad_medida || 'unidades base'}`);
+  return partes.join(' - ');
+};
+
 // Componente independiente para formulario de ventas
-const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }) => {
+const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
   const [ventaForm, setVentaForm] = useState(
     initialVenta ? {
       producto: initialVenta.producto,
@@ -103,7 +122,7 @@ const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }
       canal_venta: 'local',
       cliente: '',
       metodo_pago: 'efectivo',
-      cantidad: '',
+      cantidad: 1,
       precio_unitario: '',
       pagado: true
     }
@@ -162,7 +181,7 @@ const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }
         canal_venta: 'local',
         cliente: '',
         metodo_pago: 'efectivo',
-        cantidad: '',
+        cantidad: 1,
         precio_unitario: '',
         pagado: true
       });
@@ -180,7 +199,7 @@ const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }
   return (
     <>
       <form onSubmit={handleCreateVenta} className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-<div className="col-span-2 md:col-span-1 relative">
+        <div className="col-span-2 md:col-span-1 relative">
           <label className="block text-xs md:text-sm font-medium mb-1">Producto *</label>
           <input
             type="text"
@@ -208,7 +227,7 @@ const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }
                       setShowSuggestions(false);
                     }}
                   >
-                    {p.nombre}
+                    {getProductoLabel(p)}
                   </li>
                 ))}
             </ul>
@@ -258,6 +277,7 @@ const FormularioVentas = ({ productos, ventas, initialVenta, onVentaRegistrada }
           <label className="block text-xs md:text-sm font-medium mb-1">Cantidad *</label>
           <input
             type="number"
+            min="1"
             step="1"
             value={ventaForm.cantidad}
             onChange={(e) => setVentaForm({ ...ventaForm, cantidad: e.target.value })}
@@ -366,7 +386,7 @@ const FormularioCompras = ({ productos, onCompraRegistrada }) => {
         >
           <option value="">Seleccionar producto</option>
           {productos.map(p => (
-            <option key={p.id} value={p.id}>{p.nombre}</option>
+            <option key={p.id} value={p.id}>{getProductoLabel(p)}</option>
           ))}
         </select>
       </div>
@@ -386,6 +406,7 @@ const FormularioCompras = ({ productos, onCompraRegistrada }) => {
         <label className="block text-xs md:text-sm font-medium mb-1">Cantidad *</label>
         <input
           type="number"
+          min="1"
           step="1"
           value={compraForm.cantidad}
           onChange={(e) => setCompraForm({ ...compraForm, cantidad: e.target.value })}
@@ -443,12 +464,20 @@ const FormularioCompras = ({ productos, onCompraRegistrada }) => {
 };
 
 // Componente independiente para formulario de productos
-const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
+const FormularioProductos = ({ productos, onProductoRegistrado, initialProducto }) => {
+  const productosBase = useMemo(
+    () => productos.filter((producto) => !producto.producto_base),
+    [productos]
+  );
   const [productoForm, setProductoForm] = useState({
     nombre: '',
     unidad_medida: '',
     descripcion: '',
     precio_unitario: '',
+    marca: '',
+    categoria: '',
+    producto_base: '',
+    factor_conversion: 1,
     imagen: null
   });
   const [loading, setLoading] = useState(false);
@@ -457,16 +486,26 @@ const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
   useEffect(() => {
     if (initialProducto) {
       setProductoForm({
-        nombre: initialProducto.nombre,
-        unidad_medida: initialProducto.unidad_medida,
+        nombre: initialProducto.nombre || '',
+        unidad_medida: initialProducto.unidad_medida || '',
+        descripcion: initialProducto.descripcion || '',
         precio_unitario: initialProducto.precio_unitario || '',
+        marca: initialProducto.marca || '',
+        categoria: initialProducto.categoria || '',
+        producto_base: initialProducto.producto_base || '',
+        factor_conversion: initialProducto.factor_conversion || 1,
         imagen: null // No cargar imagen existente para edición, solo subir nueva si se quiere cambiar
       });
     } else {
       setProductoForm({
         nombre: '',
         unidad_medida: '',
+        descripcion: '',
         precio_unitario: '',
+        marca: '',
+        categoria: '',
+        producto_base: '',
+        factor_conversion: 1,
         imagen: null
       });
     }
@@ -475,16 +514,26 @@ const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
   const handleCreateProducto = useCallback(async (e) => {
     e.preventDefault();
     setLoading(true);
+    const payload = {
+      ...productoForm,
+      producto_base: productoForm.producto_base || null,
+      factor_conversion: Number(productoForm.factor_conversion) || 1
+    };
     try {
       if (editingId) {
-        await updateProducto(editingId, productoForm);
+        await updateProducto(editingId, payload);
       } else {
-        await createProducto(productoForm);
+        await createProducto(payload);
       }
       setProductoForm({
         nombre: '',
         unidad_medida: '',
+        descripcion: '',
         precio_unitario: '',
+        marca: '',
+        categoria: '',
+        producto_base: '',
+        factor_conversion: 1,
         imagen: null
       });
       alert(editingId ? 'Producto actualizado exitosamente' : 'Producto creado exitosamente');
@@ -494,7 +543,7 @@ const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
       alert('Error al crear/actualizar producto');
     }
     setLoading(false);
-  }, [productoForm, editingId]);
+  }, [productoForm, editingId, onProductoRegistrado]);
 
   return (
     <form onSubmit={handleCreateProducto} className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
@@ -522,6 +571,28 @@ const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
       </div>
 
       <div>
+        <label className="block text-xs md:text-sm font-medium mb-1">Marca</label>
+        <input
+          type="text"
+          value={productoForm.marca}
+          onChange={(e) => setProductoForm({ ...productoForm, marca: e.target.value })}
+          className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+          placeholder="Kaizen, Japofood, Premium..."
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs md:text-sm font-medium mb-1">Categoria</label>
+        <input
+          type="text"
+          value={productoForm.categoria}
+          onChange={(e) => setProductoForm({ ...productoForm, categoria: e.target.value })}
+          className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+          placeholder="Sushi, Congelados, Salsas..."
+        />
+      </div>
+
+      <div>
         <label className="block text-xs md:text-sm font-medium mb-1">Precio Unitario</label>
         <input
           type="number"
@@ -530,6 +601,47 @@ const FormularioProductos = ({ onProductoRegistrado, initialProducto }) => {
           onChange={(e) => setProductoForm({ ...productoForm, precio_unitario: e.target.value })}
           className="w-full border rounded px-3 py-2 text-xs md:text-sm"
           placeholder="0"
+        />
+      </div>
+
+      <div className="col-span-2 md:col-span-1">
+        <label className="block text-xs md:text-sm font-medium mb-1">Producto base</label>
+        <select
+          value={productoForm.producto_base}
+          onChange={(e) => setProductoForm({ ...productoForm, producto_base: e.target.value })}
+          className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+        >
+          <option value="">Este producto controla stock</option>
+          {productosBase
+            .filter((producto) => producto.id !== editingId)
+            .map((producto) => (
+              <option key={producto.id} value={producto.id}>
+                {getProductoLabel(producto)}
+              </option>
+            ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-xs md:text-sm font-medium mb-1">Conversion stock *</label>
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={productoForm.factor_conversion}
+          onChange={(e) => setProductoForm({ ...productoForm, factor_conversion: e.target.value })}
+          className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+          required
+        />
+      </div>
+
+      <div className="col-span-2 md:col-span-3">
+        <label className="block text-xs md:text-sm font-medium mb-1">Descripcion</label>
+        <textarea
+          value={productoForm.descripcion}
+          onChange={(e) => setProductoForm({ ...productoForm, descripcion: e.target.value })}
+          className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+          rows="2"
         />
       </div>
 
@@ -681,13 +793,30 @@ const App = () => {
 
   const inventoryItems = useMemo(() => {
     return inventoryItemsAll.filter((item) => {
-      const searchMatch = item.producto_nombre?.toString().toLowerCase().includes(inventorySearch.toLowerCase());
+      const searchableText = [
+        item.producto_nombre,
+        item.nombre,
+        item.marca,
+        item.categoria
+      ].filter(Boolean).join(' ').toLowerCase();
+      const searchMatch = searchableText.includes(inventorySearch.toLowerCase());
       const categoryMatch = inventoryCategory === 'all' || item.categoria === inventoryCategory;
       const statusMatch = inventoryStatus === 'all' || item.stock_status === inventoryStatus;
       const urgentMatch = !showUrgentOnly || item.stock_status !== 'optimo';
       return searchMatch && categoryMatch && statusMatch && urgentMatch;
     });
   }, [inventoryItemsAll, inventorySearch, inventoryCategory, inventoryStatus, showUrgentOnly]);
+
+  const inventoryCategories = useMemo(() => {
+    return Array.from(new Set(inventoryItemsAll.map((item) => item.categoria).filter(Boolean))).sort();
+  }, [inventoryItemsAll]);
+
+  const productosById = useMemo(() => {
+    return productos.reduce((acc, producto) => {
+      acc[String(producto.id)] = producto;
+      return acc;
+    }, {});
+  }, [productos]);
 
   const inventoryValueTotal = useMemo(() => {
     return inventoryItemsAll.reduce((sum, item) => {
@@ -706,19 +835,24 @@ const App = () => {
   const getMovementsForItem = useCallback((item) => {
     const key = item.producto ?? item.id ?? item.producto_id;
     const name = item.producto_nombre?.toString().toLowerCase();
+    const itemBaseKey = String(key);
     const movimientos = [];
 
     const addCompra = (compra, detalle) => {
       if (!detalle) return;
       const productId = detalle.producto ?? detalle.producto_id;
       const productName = detalle.producto_nombre?.toString().toLowerCase();
-      if (String(productId) === String(key) || (name && productName === name)) {
+      const producto = productosById[String(productId)];
+      const productBaseKey = String(getProductoBaseId(producto) ?? productId);
+      if (productBaseKey === itemBaseKey || String(productId) === itemBaseKey || (name && productName === name)) {
+        const factor = getProductoFactorConversion(producto);
+        const cantidad = (Number(detalle.cantidad) || 0) * factor;
         movimientos.push({
           fecha: compra.fecha || compra.created_at || compra.updated_at || obtenerFechaLocal(),
           tipo: 'Compra',
-          cantidad: Number(detalle.cantidad) || 0,
+          cantidad,
           total: Number(detalle.costo_unitario) * Number(detalle.cantidad) || 0,
-          referencia: compra.proveedor || detalle.proveedor || 'Proveedor no definido',
+          referencia: `${compra.proveedor || detalle.proveedor || 'Proveedor no definido'} - ${producto ? getProductoLabel(producto) : detalle.producto_nombre || 'Presentacion'}`,
         });
       }
     };
@@ -726,13 +860,17 @@ const App = () => {
     const addVenta = (venta) => {
       const productId = venta.producto ?? venta.producto_id;
       const productName = venta.producto_nombre?.toString().toLowerCase();
-      if (String(productId) === String(key) || (name && productName === name)) {
+      const producto = productosById[String(productId)];
+      const productBaseKey = String(getProductoBaseId(producto) ?? productId);
+      if (productBaseKey === itemBaseKey || String(productId) === itemBaseKey || (name && productName === name)) {
+        const factor = getProductoFactorConversion(producto);
+        const cantidad = (Number(venta.cantidad) || 0) * factor;
         movimientos.push({
           fecha: venta.fecha || venta.created_at || venta.updated_at || obtenerFechaLocal(),
           tipo: 'Venta',
-          cantidad: -(Number(venta.cantidad) || 0),
+          cantidad: -cantidad,
           total: Number(venta.precio_unitario) * Number(venta.cantidad) || 0,
-          referencia: venta.cliente || 'Cliente no definido',
+          referencia: `${venta.cliente || 'Cliente no definido'} - ${producto ? getProductoLabel(producto) : venta.producto_nombre || 'Presentacion'}`,
         });
       }
     };
@@ -761,25 +899,27 @@ const App = () => {
     inventoryAdjustments.forEach(addAdjustment);
 
     return movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-  }, [compras, ventas, inventoryAdjustments]);
+  }, [compras, ventas, inventoryAdjustments, productosById]);
 
   const getProviderForItem = useCallback((item) => {
     if (!item) return 'N/D';
     if (item.proveedor) return item.proveedor;
     const providers = {};
+    const itemKey = String(item.producto ?? item.id ?? item.producto_id);
     compras.forEach((compra) => {
       const detalles = Array.isArray(compra.compras_data) ? compra.compras_data : Array.isArray(compra.compras) ? compra.compras : [compra];
       detalles.forEach((detalle) => {
         const productId = detalle.producto ?? detalle.producto_id;
-        const itemKey = item.producto ?? item.id ?? item.producto_id;
-        if (String(productId) === String(itemKey) || String(detalle.producto_nombre)?.toLowerCase() === String(item.producto_nombre)?.toLowerCase()) {
+        const producto = productosById[String(productId)];
+        const productBaseKey = String(getProductoBaseId(producto) ?? productId);
+        if (productBaseKey === itemKey || String(productId) === itemKey || String(detalle.producto_nombre)?.toLowerCase() === String(item.producto_nombre)?.toLowerCase()) {
           const proveedor = compra.proveedor || detalle.proveedor || 'N/D';
           providers[proveedor] = (providers[proveedor] || 0) + 1;
         }
       });
     });
     return Object.entries(providers).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/D';
-  }, [compras]);
+  }, [compras, productosById]);
 
   const handleOpenDetail = (item) => {
     setSelectedInventoryItem(item);
@@ -789,7 +929,7 @@ const App = () => {
   const handleOpenAdjustment = (item = null) => {
     setSelectedInventoryItem(item);
     setAdjustmentForm({
-      productoId: item?.producto ?? item?.id ?? null,
+      productoId: item?.producto ?? item?.id ?? item?.producto_id ?? null,
       type: 'perdida',
       cantidad: '',
       stock_real: item ? String(item.stock_actual) : '',
@@ -1941,7 +2081,6 @@ const App = () => {
           )}
           <FormularioVentas
             productos={productos}
-            ventas={ventas}
             initialVenta={editingVenta}
             onVentaRegistrada={() => {
               setEditingVenta(null);
@@ -2063,7 +2202,7 @@ const App = () => {
                                 loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
                                 loadInventario();
                                 loadReporte();
-                              } catch (error) {
+                              } catch {
                                 alert('Error al eliminar venta');
                               }
                             })();
@@ -2188,10 +2327,9 @@ const App = () => {
               className="w-full border rounded px-3 py-2 text-sm"
             >
               <option value="all">Todas</option>
-              <option value="Insumos / Envases">Insumos / Envases</option>
-              <option value="Materia Prima / Alimentos">Materia Prima / Alimentos</option>
-              <option value="Productos Finales">Productos Finales</option>
-              <option value="Otros">Otros</option>
+              {inventoryCategories.map((categoria) => (
+                <option key={categoria} value={categoria}>{categoria}</option>
+              ))}
             </select>
           </div>
           <div className="col-span-1">
@@ -2235,6 +2373,7 @@ const App = () => {
               <div>
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{item.categoria}</p>
                 <h3 className="text-lg font-bold mt-2">{item.producto_nombre || item.nombre}</h3>
+                {item.marca && <p className="text-xs text-slate-600 mt-1">Marca: {item.marca}</p>}
               </div>
               <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${item.stock_status === 'sin_stock' ? 'bg-red-500 text-white' : item.stock_status === 'bajo_stock' ? 'bg-amber-500 text-slate-950' : 'bg-emerald-500 text-white'}`}>
                 {getStockStatusLabel(item.stock_status)}
@@ -2243,6 +2382,7 @@ const App = () => {
 
             <div className="space-y-3 text-sm text-slate-700">
               <p><span className="font-semibold">Stock:</span> {item.stock_actual}</p>
+              <p><span className="font-semibold">Unidad base:</span> {item.unidad_medida || 'N/D'}</p>
               <p><span className="font-semibold">Mínimo:</span> {item.stock_minimo ?? 'N/D'}</p>
               <p><span className="font-semibold">Proveedor:</span> {getProviderForItem(item)}</p>
               <p><span className="font-semibold">Compras:</span> {item.total_compras ?? 'n/a'}</p>
@@ -2547,6 +2687,7 @@ const App = () => {
             </button>
           )}
           <FormularioProductos
+            productos={productos}
             onProductoRegistrado={() => {
               setEditingProducto(null);
               loadProductos();
@@ -2575,6 +2716,28 @@ const App = () => {
                       <p>
                         <span className="font-semibold">Unidad:</span>{' '}
                         <span className="text-gray-600">{p.unidad_medida}</span>
+                      </p>
+                      {p.marca && (
+                        <p>
+                          <span className="font-semibold">Marca:</span>{' '}
+                          <span className="text-gray-600">{p.marca}</span>
+                        </p>
+                      )}
+                      {p.categoria && (
+                        <p>
+                          <span className="font-semibold">Categoria:</span>{' '}
+                          <span className="text-gray-600">{p.categoria}</span>
+                        </p>
+                      )}
+                      <p>
+                        <span className="font-semibold">Inventario:</span>{' '}
+                        <span className="text-gray-600">
+                          {p.producto_base_nombre ? `Presentacion de ${p.producto_base_nombre}` : 'Producto base'}
+                        </span>
+                      </p>
+                      <p>
+                        <span className="font-semibold">Conversion:</span>{' '}
+                        <span className="text-gray-600">{getProductoFactorConversion(p)} unidad(es) base</span>
                       </p>
                       {p.precio_unitario && (
                         <p>

@@ -32,7 +32,7 @@ function Login({ onLogin }) {
           {/* Logo/Título */}
           <div className="text-center mb-8">
             <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-2">
-              Portal de Acceso
+              Portal de Accesoo
             </h1>
             <p className="text-gray-600 text-sm">
               Sistema ERP para la gestión de tu empresa. Inicia sesión para continuar.

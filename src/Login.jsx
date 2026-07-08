@@ -121,7 +121,7 @@ function Login({ onLogin }) {
           {/* Footer */}
           <div className="mt-8 pt-6 border-t border-gray-200 text-center">
             <p className="text-gray-600 text-xs">
-              © 2026 Insumos Sushii. Todos los derechos reservados.
+              © 2026 Elidev08. Todos los derechos reservados.
             </p>
           </div>
         </div>

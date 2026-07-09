@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import ComprasPadre from './ComprasPadre';
 import { createVenta, updateVenta, deleteVenta, fetchVentas, fetchAllVentas } from './api/ventas';
-import { createCompra, fetchCompras } from './api/compras';
+import { createCompra, fetchAllCompras } from './api/compras';
 import { createProducto, updateProducto, deleteProducto, fetchProductos } from './api/productos';
 import { fetchInventario, fetchReporteFinanciero } from './api/inventario';
 import {
@@ -756,7 +756,7 @@ const App = () => {
 
   const loadCompras = useCallback(async () => {
     try {
-      const data = await fetchCompras();
+      const data = await fetchAllCompras();
       setCompras(Array.isArray(data) ? data : data.results ?? []);
     } catch (error) {
       console.error('Error:', error);
@@ -1686,9 +1686,28 @@ const App = () => {
   // Gastos Tab - Análisis detallado de compras
   const GastosTab = () => {
     const comprasArray = Array.isArray(compras) ? compras : compras?.results ?? [];
+    const [filtroFecha, setFiltroFecha] = useState('');
+    const [filtroProveedor, setFiltroProveedor] = useState('');
+    const [filtroProducto, setFiltroProducto] = useState('');
+
+    const comprasFiltradas = useMemo(() => {
+      const normalize = (value) => String(value ?? '').toLowerCase().trim();
+      return comprasArray.filter((c) => {
+        const fechaTexto = normalize(formatearFecha(c.fecha));
+        const fechaRaw = normalize(c.fecha);
+        const proveedorTexto = normalize(c.proveedor);
+        const productoTexto = normalize(c.producto_nombre || 'Sin producto');
+
+        const coincideFecha = !filtroFecha || fechaTexto.includes(filtroFecha.toLowerCase()) || fechaRaw.includes(filtroFecha.toLowerCase());
+        const coincideProveedor = !filtroProveedor || proveedorTexto.includes(filtroProveedor.toLowerCase());
+        const coincideProducto = !filtroProducto || productoTexto.includes(filtroProducto.toLowerCase());
+
+        return coincideFecha && coincideProveedor && coincideProducto;
+      });
+    }, [comprasArray, filtroFecha, filtroProveedor, filtroProducto]);
 
     // Agrupar compras por fecha
-    const comprasPorDia = comprasArray.reduce((acc, c) => {
+    const comprasPorDia = comprasFiltradas.reduce((acc, c) => {
       const fecha = c.fecha;
       const existing = acc.find(item => item.fecha === fecha);
       const costo = parseFloat(c.costo_unitario) * parseInt(c.cantidad);
@@ -1704,7 +1723,7 @@ const App = () => {
     // Agrupar por semana usando la función helper
     const comprasPorSemanaMap = {};
     const comprasPorSemanaDetalles = {};
-    comprasArray.forEach(c => {
+    comprasFiltradas.forEach(c => {
       const weekInfo = getWeekInfo(c.fecha);
       const costo = parseFloat(c.costo_unitario) * parseInt(c.cantidad);
       comprasPorSemanaMap[weekInfo.weekKey] = (comprasPorSemanaMap[weekInfo.weekKey] || 0) + costo;
@@ -1726,7 +1745,7 @@ const App = () => {
 
     // Agrupar por mes
     const comprasPorMesMap = {};
-    comprasArray.forEach(c => {
+    comprasFiltradas.forEach(c => {
       const date = new Date(c.fecha + 'T00:00:00');
       const mesAño = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       const costo = parseFloat(c.costo_unitario) * parseInt(c.cantidad);
@@ -1740,7 +1759,7 @@ const App = () => {
         total: comprasPorMesMap[mes]
       }));
 
-    const totalGastos = comprasArray.reduce((sum, c) => {
+    const totalGastos = comprasFiltradas.reduce((sum, c) => {
       const costo = parseFloat(c.costo_unitario) * parseInt(c.cantidad);
       return sum + costo;
     }, 0);
@@ -1826,6 +1845,102 @@ const App = () => {
           ) : (
             <p className="text-gray-500 text-center py-8">No hay datos</p>
           )}
+        </div>
+
+        <div className="bg-white p-4 md:p-6 rounded-lg shadow mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg md:text-xl font-bold">Registro completo de compras</h3>
+            <span className="text-sm text-gray-500">{comprasFiltradas.length} registros</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por fecha</label>
+              <input
+                type="text"
+                value={filtroFecha}
+                onChange={(e) => setFiltroFecha(e.target.value)}
+                list="compras-fechas"
+                placeholder="Ej. 2026-07"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              />
+              <datalist id="compras-fechas">
+                {[...new Set(comprasArray.map((c) => c.fecha).filter(Boolean))].map((fecha) => (
+                  <option key={fecha} value={formatearFecha(fecha)} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por proveedor</label>
+              <input
+                type="text"
+                value={filtroProveedor}
+                onChange={(e) => setFiltroProveedor(e.target.value)}
+                list="compras-proveedores"
+                placeholder="Ej. Proveedor A"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              />
+              <datalist id="compras-proveedores">
+                {[...new Set(comprasArray.map((c) => c.proveedor).filter(Boolean))].map((proveedor) => (
+                  <option key={proveedor} value={proveedor} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por producto</label>
+              <input
+                type="text"
+                value={filtroProducto}
+                onChange={(e) => setFiltroProducto(e.target.value)}
+                list="compras-productos"
+                placeholder="Ej. Arroz"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              />
+              <datalist id="compras-productos">
+                {[...new Set(comprasArray.map((c) => c.producto_nombre || 'Sin producto').filter(Boolean))].map((producto) => (
+                  <option key={producto} value={producto} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs md:text-sm">
+              <thead className="bg-gray-100 sticky top-0">
+                <tr>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">N°</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Producto</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Cant.</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Costo unit.</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Total</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Proveedor</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Valor Venta</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Ganancia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comprasFiltradas.map((c) => {
+                  const costo = Number(c.costo_unitario || 0) * Number(c.cantidad || 0);
+                  const valorVentaTotal = Number(c.cantidad || 0) * Number(c.valor_venta || 0);
+                  const ganancia = valorVentaTotal - costo;
+                  return (
+                    <tr key={c.id} className="border-b hover:bg-gray-50">
+                      <td className="p-2 md:p-3 whitespace-nowrap">{formatearFecha(c.fecha)}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap font-semibold">{c.numero || c.id}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap">{c.producto_nombre || 'Sin producto'}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap">{c.cantidad}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap">${Number(c.costo_unitario || 0)}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap font-semibold">${costo}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap">{c.proveedor || 'Sin proveedor'}</td>
+                      <td className="p-2 md:p-3 whitespace-nowrap">${valorVentaTotal}</td>
+                      <td className={`p-2 md:p-3 whitespace-nowrap font-semibold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${ganancia}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
@@ -3144,7 +3259,7 @@ const App = () => {
         >
           <div className="p-5 flex flex-col h-full">
             <div className="mb-6">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-500 mb-2">Kaizen ERP</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500 mb-2">System ERP</p>
               <h2 className="text-2xl font-bold">Panel de Control</h2>
             </div>
             <nav className="space-y-2 flex-1">

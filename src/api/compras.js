@@ -11,6 +11,26 @@ export const fetchCompras = async () => {
   }
 };
 
+export const fetchAllCompras = async () => {
+  try {
+    let allResults = [];
+    let nextUrl = '/api/compras/';
+
+    while (nextUrl) {
+      const response = await apiClient.get(nextUrl);
+      const data = response.data;
+      const pageResults = Array.isArray(data) ? data : data.results ?? [];
+      allResults = allResults.concat(pageResults);
+      nextUrl = data.next || null;
+    }
+
+    return allResults;
+  } catch (error) {
+    console.error('Error al obtener todas las compras:', error);
+    throw error;
+  }
+};
+
 // Crear una nueva compra
 export const createCompra = async (compraData) => {
   try {

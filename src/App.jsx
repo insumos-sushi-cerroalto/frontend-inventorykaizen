@@ -5,6 +5,18 @@ import { createVenta, updateVenta, deleteVenta, fetchVentas, fetchAllVentas } fr
 import { createCompra, fetchCompras } from './api/compras';
 import { createProducto, updateProducto, deleteProducto, fetchProductos } from './api/productos';
 import { fetchInventario, fetchReporteFinanciero } from './api/inventario';
+import {
+  fetchMovimientos,
+  fetchBalanceFinanciero,
+  createMovimiento,
+  updateMovimiento,
+  deleteMovimiento,
+  fetchDistribuciones,
+  fetchDistribucionCalculada,
+  createDistribucion,
+  updateDistribucion,
+  deleteDistribucion,
+} from './api/finanzas';
 import Login from "./Login";
 import { logout, isAuthenticated } from "./api/auth";
 
@@ -687,6 +699,7 @@ const App = () => {
   const [compras, setCompras] = useState([]);
   const [inventario, setInventario] = useState([]);
   const [reporte, setReporte] = useState(null);
+  const [finanzas, setFinanzas] = useState({ balance: null, movimientos: [], distribuciones: [], calculada: null });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [analisisOpen, setAnalisisOpen] = useState(false);
   const [auth, setAuth] = useState(isAuthenticated());
@@ -765,6 +778,20 @@ const App = () => {
       setReporte(data);
     } catch (error) {
       console.error('Error:', error);
+    }
+  }, []);
+
+  const loadFinanzas = useCallback(async () => {
+    try {
+      const [balance, movimientos, distribuciones, calculada] = await Promise.all([
+        fetchBalanceFinanciero(),
+        fetchMovimientos(),
+        fetchDistribuciones(),
+        fetchDistribucionCalculada().catch(() => null),
+      ]);
+      setFinanzas({ balance, movimientos, distribuciones, calculada });
+    } catch (error) {
+      console.error('Error al cargar finanzas:', error);
     }
   }, []);
 
@@ -1029,7 +1056,8 @@ const App = () => {
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, orderingValue, appliedFilters]);
+    loadFinanzas();
+  }, [loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, loadFinanzas, orderingValue, appliedFilters]);
 
   // Cargar datos cuando el usuario está autenticado (al montar o al iniciar sesión)
   useEffect(() => {
@@ -1039,7 +1067,8 @@ const App = () => {
     loadCompras();
     loadInventario();
     loadReporte();
-  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, orderingValue, appliedFilters]);
+    loadFinanzas();
+  }, [auth, loadProductos, loadVentas, loadCompras, loadInventario, loadReporte, loadFinanzas, orderingValue, appliedFilters]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -2087,6 +2116,7 @@ const App = () => {
               loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
               loadInventario();
               loadReporte();
+              loadFinanzas();
             }}
           />
         </div>
@@ -2202,6 +2232,7 @@ const App = () => {
                                 loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
                                 loadInventario();
                                 loadReporte();
+                                loadFinanzas();
                               } catch {
                                 alert('Error al eliminar venta');
                               }
@@ -2248,6 +2279,300 @@ const App = () => {
     );
   };
 
+  const FinanzasTab = () => {
+    const [form, setForm] = useState({
+      fecha: obtenerFechaLocal(),
+      tipo_movimiento: 'ingreso',
+      categoria: '',
+      descripcion: '',
+      monto: '',
+      observaciones: '',
+      es_manual: true,
+    });
+    const [filters, setFilters] = useState({ fecha: '', tipo: 'all', categoria: '' });
+    const [editingId, setEditingId] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [distForm, setDistForm] = useState({ nombre: '', porcentaje: '', descripcion: '' });
+    const [distLoading, setDistLoading] = useState(false);
+
+    const balance = finanzas.balance;
+    const movimientos = Array.isArray(finanzas.movimientos) ? finanzas.movimientos : [];
+    const distribuciones = Array.isArray(finanzas.distribuciones) ? finanzas.distribuciones : [];
+    const calculada = finanzas.calculada;
+
+    const filteredMovimientos = useMemo(() => {
+      return movimientos.filter((item) => {
+        const fechaMatch = !filters.fecha || item.fecha === filters.fecha;
+        const tipoMatch = filters.tipo === 'all' || item.tipo_movimiento === filters.tipo;
+        const categoriaMatch = !filters.categoria || (item.categoria || '').toLowerCase().includes(filters.categoria.toLowerCase());
+        return fechaMatch && tipoMatch && categoriaMatch;
+      });
+    }, [movimientos, filters]);
+
+    const handleSubmitMovimiento = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      try {
+        const payload = {
+          ...form,
+          monto: Number(form.monto),
+        };
+        if (editingId) {
+          await updateMovimiento(editingId, payload);
+        } else {
+          await createMovimiento(payload);
+        }
+        setForm({ fecha: obtenerFechaLocal(), tipo_movimiento: 'ingreso', categoria: '', descripcion: '', monto: '', observaciones: '', es_manual: true });
+        setEditingId(null);
+        await loadFinanzas();
+      } catch (error) {
+        console.error('Error al guardar movimiento:', error);
+        alert('No se pudo guardar el movimiento financiero.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleEditMovimiento = (mov) => {
+      setEditingId(mov.id);
+      setForm({
+        fecha: mov.fecha,
+        tipo_movimiento: mov.tipo_movimiento,
+        categoria: mov.categoria || '',
+        descripcion: mov.descripcion || '',
+        monto: mov.monto || '',
+        observaciones: mov.observaciones || '',
+        es_manual: mov.es_manual ?? true,
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleDeleteMovimiento = async (id) => {
+      if (!window.confirm('¿Deseas eliminar este movimiento?')) return;
+      try {
+        await deleteMovimiento(id);
+        await loadFinanzas();
+      } catch (error) {
+        console.error('Error al eliminar movimiento:', error);
+        alert('No se pudo eliminar el movimiento.');
+      }
+    };
+
+    const handleSubmitDistribucion = async (e) => {
+      e.preventDefault();
+      setDistLoading(true);
+      try {
+        await createDistribucion({
+          nombre: distForm.nombre,
+          porcentaje: Number(distForm.porcentaje),
+          descripcion: distForm.descripcion,
+          activo: true,
+          orden: distribuciones.length + 1,
+        });
+        setDistForm({ nombre: '', porcentaje: '', descripcion: '' });
+        await loadFinanzas();
+      } catch (error) {
+        console.error('Error al guardar distribución:', error);
+        alert('No se pudo guardar la distribución, verifica que el porcentaje total sea del 100%.');
+      } finally {
+        setDistLoading(false);
+      }
+    };
+
+    const handleDeleteDistribucion = async (id) => {
+      if (!window.confirm('¿Deseas eliminar esta categoría?')) return;
+      try {
+        await deleteDistribucion(id);
+        await loadFinanzas();
+      } catch (error) {
+        console.error('Error al eliminar distribución:', error);
+        alert('No se pudo eliminar la categoría.');
+      }
+    };
+
+    const formatAmount = (value) => formatCurrency(value || 0);
+
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-bold">Cuentas y Movimientos Financieros</h2>
+            <p className="text-sm text-slate-600 mt-1">Controla ingresos, egresos, saldo y distribución de utilidades en tiempo real.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white p-5 rounded-2xl shadow">
+            <p className="text-sm opacity-90">Saldo actual</p>
+            <p className="text-2xl font-bold mt-2">{formatAmount(balance?.saldo_actual)}</p>
+          </div>
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-5 rounded-2xl shadow">
+            <p className="text-sm opacity-90">Total ingresos</p>
+            <p className="text-2xl font-bold mt-2">{formatAmount(balance?.total_ingresos)}</p>
+          </div>
+          <div className="bg-gradient-to-br from-rose-500 to-rose-600 text-white p-5 rounded-2xl shadow">
+            <p className="text-sm opacity-90">Total egresos</p>
+            <p className="text-2xl font-bold mt-2">{formatAmount(balance?.total_egresos)}</p>
+          </div>
+          <div className="bg-gradient-to-br from-amber-500 to-orange-500 text-white p-5 rounded-2xl shadow">
+            <p className="text-sm opacity-90">Balance general</p>
+            <p className="text-2xl font-bold mt-2">{formatAmount(balance?.balance_general)}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
+          <div className="bg-white rounded-2xl shadow p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Registrar movimiento manual</h3>
+              <span className="text-xs text-slate-500">{editingId ? 'Editando' : 'Nuevo'}</span>
+            </div>
+            <form onSubmit={handleSubmitMovimiento} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold mb-2">Fecha</label>
+                <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">Tipo de movimiento</label>
+                <select value={form.tipo_movimiento} onChange={(e) => setForm({ ...form, tipo_movimiento: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" required>
+                  <option value="ingreso">Ingreso</option>
+                  <option value="egreso">Egreso</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">Categoría</label>
+                <input type="text" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" placeholder="Ej. Abono, Gastos" required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">Monto</label>
+                <input type="number" min="1" step="1" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold mb-2">Descripción</label>
+                <input type="text" value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" placeholder="Ej. Aporte inicial" required />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold mb-2">Observaciones</label>
+                <textarea value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" rows="3" />
+              </div>
+              <div className="md:col-span-2 flex flex-col sm:flex-row gap-3">
+                <button type="submit" disabled={loading} className="bg-slate-900 text-white px-5 py-2 rounded hover:bg-slate-700 transition disabled:opacity-60">
+                  {loading ? 'Guardando...' : editingId ? 'Actualizar movimiento' : 'Guardar movimiento'}
+                </button>
+                {editingId && <button type="button" onClick={() => { setEditingId(null); setForm({ fecha: obtenerFechaLocal(), tipo_movimiento: 'ingreso', categoria: '', descripcion: '', monto: '', observaciones: '', es_manual: true }); }} className="border border-slate-300 px-5 py-2 rounded hover:bg-slate-50 transition">Cancelar</button>}
+              </div>
+            </form>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow p-5">
+            <h3 className="text-lg font-bold mb-4">Distribución de utilidades</h3>
+            <form onSubmit={handleSubmitDistribucion} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-2">Nombre</label>
+                <input type="text" value={distForm.nombre} onChange={(e) => setDistForm({ ...distForm, nombre: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">Porcentaje</label>
+                <input type="number" min="1" max="100" value={distForm.porcentaje} onChange={(e) => setDistForm({ ...distForm, porcentaje: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-2">Descripción</label>
+                <input type="text" value={distForm.descripcion} onChange={(e) => setDistForm({ ...distForm, descripcion: e.target.value })} className="w-full border rounded px-3 py-2 text-sm" />
+              </div>
+              <button type="submit" disabled={distLoading} className="w-full bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 transition disabled:opacity-60">{distLoading ? 'Guardando...' : 'Agregar categoría'}</button>
+            </form>
+            {calculada && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-700">Utilidad actual</p>
+                <p className="text-xl font-bold text-emerald-800">{formatAmount(calculada.utilidad)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold">Historial de movimientos</h3>
+              <p className="text-sm text-slate-600">Filtra por fecha, tipo o categoría.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input type="date" value={filters.fecha} onChange={(e) => setFilters({ ...filters, fecha: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+              <select value={filters.tipo} onChange={(e) => setFilters({ ...filters, tipo: e.target.value })} className="border rounded px-3 py-2 text-sm">
+                <option value="all">Todos</option>
+                <option value="ingreso">Ingresos</option>
+                <option value="egreso">Egresos</option>
+              </select>
+              <input type="text" value={filters.categoria} onChange={(e) => setFilters({ ...filters, categoria: e.target.value })} className="border rounded px-3 py-2 text-sm" placeholder="Categoría" />
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="text-left p-3">Fecha</th>
+                  <th className="text-left p-3">Tipo</th>
+                  <th className="text-left p-3">Categoría</th>
+                  <th className="text-left p-3">Descripción</th>
+                  <th className="text-right p-3">Monto</th>
+                  <th className="text-left p-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMovimientos.map((mov) => (
+                  <tr key={mov.id} className="border-b border-slate-100">
+                    <td className="p-3">{formatearFecha(mov.fecha)}</td>
+                    <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${mov.tipo_movimiento === 'ingreso' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{mov.tipo_movimiento === 'ingreso' ? 'Ingreso' : 'Egreso'}</span></td>
+                    <td className="p-3">{mov.categoria}</td>
+                    <td className="p-3">{mov.descripcion}</td>
+                    <td className={`p-3 text-right font-semibold ${mov.tipo_movimiento === 'ingreso' ? 'text-emerald-600' : 'text-rose-600'}`}>{formatAmount(mov.monto)}</td>
+                    <td className="p-3">
+                      <div className="flex gap-2">
+                        <button onClick={() => handleEditMovimiento(mov)} className="text-sm text-blue-600 hover:text-blue-800">Editar</button>
+                        <button onClick={() => handleDeleteMovimiento(mov.id)} className="text-sm text-rose-600 hover:text-rose-800">Eliminar</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filteredMovimientos.length === 0 && <p className="text-center text-sm text-slate-500 py-6">No hay movimientos para los filtros seleccionados.</p>}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">Categorías de distribución</h3>
+            <span className="text-sm text-slate-500">Suma de porcentajes debe ser 100%</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {distribuciones.map((item) => (
+              <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">{item.nombre}</p>
+                    <p className="text-sm text-slate-600">{item.descripcion || 'Sin descripción'}</p>
+                  </div>
+                  <button onClick={() => handleDeleteDistribucion(item.id)} className="text-sm text-rose-600 hover:text-rose-800">Eliminar</button>
+                </div>
+                <div className="mt-4 flex items-end justify-between">
+                  <div>
+                    <p className="text-xs text-slate-500">Porcentaje</p>
+                    <p className="text-xl font-bold">{item.porcentaje}%</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-500">Monto estimado</p>
+                    <p className="text-sm font-semibold">{formatAmount(calculada?.items?.find((entry) => entry.id === item.id)?.monto || 0)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {distribuciones.length === 0 && <p className="text-center text-sm text-slate-500 py-6">Aún no hay categorías configuradas.</p>}
+        </div>
+      </div>
+    );
+  };
+
   // Compras Tab
   const ComprasTab = () => (
     <div className="p-4 md:p-6">
@@ -2258,6 +2583,7 @@ const App = () => {
           loadCompras();
           loadInventario();
           loadReporte();
+          loadFinanzas();
         }}
       />
     </div>
@@ -2857,6 +3183,17 @@ const App = () => {
               </button>
               <button
                 onClick={() => {
+                  setActiveTab('finanzas');
+                }}
+                className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'finanzas'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'hover:bg-slate-800/80'
+                  }`}
+              >
+                💳 Cuentas
+              </button>
+              <button
+                onClick={() => {
                   setActiveTab('inventario');
                 }}
                 className={`w-full text-left px-4 py-3 rounded-lg mb-2 transition ${activeTab === 'inventario'
@@ -2933,6 +3270,7 @@ const App = () => {
           {activeTab === 'ventas' && <VentasTab />}
           {activeTab === 'ingresos' && <IngresosTab />}
           {activeTab === 'compras' && <ComprasTab />}
+          {activeTab === 'finanzas' && <FinanzasTab />}
           {activeTab === 'gastos' && <GastosTab />}
           {activeTab === 'comparativa' && <ComparativaTab />}
           {activeTab === 'porpagar' && <PorPagarTab />}

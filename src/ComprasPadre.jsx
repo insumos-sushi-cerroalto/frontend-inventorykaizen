@@ -192,6 +192,7 @@ const ComprasPadre = ({ productos, onCompraRegistrada }) => {
         await deleteCompraPadre(compraId);
         alert('Compra eliminada exitosamente');
         loadComprasPadre();
+        if (onCompraRegistrada) onCompraRegistrada();
       } catch (error) {
         console.error('Error:', error);
         alert('Error al eliminar compra');

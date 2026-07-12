@@ -33,6 +33,14 @@ const formatearFecha = (fecha) => {
   return `${day}-${month}-${year}`;
 };
 
+const getMetodoPagoLabel = (metodoPago) => {
+  const valor = (metodoPago ?? '').toString().trim().toLowerCase();
+  if (valor.includes('mercado')) return 'Mercado Pago';
+  if (valor.includes('cuenta')) return 'Cuenta Rut';
+  if (valor.includes('efectivo')) return 'Efectivo';
+  return metodoPago || 'Sin método';
+};
+
 // Función para obtener la fecha local en formato YYYY-MM-DD
 const obtenerFechaLocal = () => {
   const now = new Date();
@@ -122,21 +130,21 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
     initialVenta ? {
       producto: initialVenta.producto,
       fecha: initialVenta.fecha,
-      canal_venta: initialVenta.canal_venta,
       cliente: initialVenta.cliente,
       metodo_pago: initialVenta.metodo_pago,
       cantidad: initialVenta.cantidad,
       precio_unitario: initialVenta.precio_unitario,
-      pagado: initialVenta.pagado
+      pagado: initialVenta.pagado,
+      monto_pendiente: initialVenta.monto_pendiente ?? 0
     } : {
       producto: '',
       fecha: obtenerFechaLocal(),
-      canal_venta: 'local',
       cliente: '',
       metodo_pago: 'efectivo',
       cantidad: 1,
       precio_unitario: '',
-      pagado: true
+      pagado: true,
+      monto_pendiente: 0
     }
   );
   const [loading, setLoading] = useState(false);
@@ -153,12 +161,12 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
       setVentaForm({
         producto: initialVenta.producto,
         fecha: initialVenta.fecha,
-        canal_venta: initialVenta.canal_venta,
         cliente: initialVenta.cliente,
         metodo_pago: initialVenta.metodo_pago,
         cantidad: initialVenta.cantidad,
         precio_unitario: initialVenta.precio_unitario,
-        pagado: initialVenta.pagado
+        pagado: initialVenta.pagado,
+        monto_pendiente: initialVenta.monto_pendiente ?? 0
       });
     }
   }, [initialVenta, productos]);
@@ -190,12 +198,12 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
       setVentaForm({
         producto: '',
         fecha: obtenerFechaLocal(),
-        canal_venta: 'local',
         cliente: '',
         metodo_pago: 'efectivo',
         cantidad: 1,
         precio_unitario: '',
-        pagado: true
+        pagado: true,
+        monto_pendiente: 0
       });
       setProductSearch('');
       setShowSuggestions(false);
@@ -257,23 +265,6 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
           />
         </div>
 
-        <div>
-          <label className="block text-xs md:text-sm font-medium mb-1">Canal de Venta *</label>
-          <select
-            value={ventaForm.canal_venta}
-            onChange={(e) => setVentaForm({ ...ventaForm, canal_venta: e.target.value })}
-            className="w-full border rounded px-3 py-2 text-xs md:text-sm"
-            required
-          >
-            <option value="local">Local</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="messenger">Messenger</option>
-            <option value="instagram">Instagram</option>
-            <option value="telefono">Teléfono</option>
-            <option value="otro">Otro</option>
-          </select>
-        </div>
-
         <div className="col-span-2 md:col-span-1">
           <label className="block text-xs md:text-sm font-medium mb-1">Cliente *</label>
           <input
@@ -319,10 +310,8 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
             required
           >
             <option value="efectivo">Efectivo</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="factura">Factura</option>
-            <option value="debito">Debito</option>
-            <option value="credito">Crédito</option>
+            <option value="cuenta_rut">Cuenta Rut</option>
+            <option value="mercado_pago">Mercado Pago</option>
           </select>
         </div>
 
@@ -331,11 +320,28 @@ const FormularioVentas = ({ productos, initialVenta, onVentaRegistrada }) => {
             <input
               type="checkbox"
               checked={ventaForm.pagado}
-              onChange={(e) => setVentaForm({ ...ventaForm, pagado: e.target.checked })}
+              onChange={(e) => {
+                const nextPagado = e.target.checked;
+                setVentaForm({ ...ventaForm, pagado: nextPagado, monto_pendiente: nextPagado ? 0 : ventaForm.monto_pendiente || 0 });
+              }}
               className="mr-2"
             />
             <span className="text-xs md:text-sm font-medium">¿Pagado?</span>
           </label>
+        </div>
+
+        <div className="col-span-2 md:col-span-1">
+          <label className="block text-xs md:text-sm font-medium mb-1">Monto pendiente</label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={ventaForm.monto_pendiente}
+            onChange={(e) => setVentaForm({ ...ventaForm, monto_pendiente: Number(e.target.value) || 0 })}
+            className="w-full border rounded px-3 py-2 text-xs md:text-sm"
+            disabled={ventaForm.pagado}
+            placeholder="0"
+          />
         </div>
 
         <div className="col-span-2 md:col-span-3">
@@ -724,7 +730,6 @@ const App = () => {
   const [activeFilters, setActiveFilters] = useState({
     producto_nombre: new Set(),
     cliente: new Set(),
-    canal_venta: new Set(),
     pagado: new Set()
   });
   const [activeColumnFilter, setActiveColumnFilter] = useState(null);
@@ -1244,7 +1249,7 @@ const App = () => {
   const PorPagarTab = () => {
     const ventasArray = Array.isArray(ventas) ? ventas : ventas?.results ?? [];
     const ventasPendientes = ventasArray.filter(v => !v.pagado);
-    const totalPendiente = ventasPendientes.reduce((sum, v) => sum + parseFloat(v.total), 0);
+    const totalPendiente = ventasPendientes.reduce((sum, v) => sum + Number(v.monto_pendiente ?? v.total ?? 0), 0);
 
     return (
       <div className="p-4 md:p-6">
@@ -1274,40 +1279,41 @@ const App = () => {
         <div className="bg-white p-4 md:p-6 rounded-lg shadow">
           <h3 className="text-lg md:text-xl font-bold mb-4">Listado de Ventas Pendientes</h3>
           {ventasPendientes.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
+            <div className="overflow-x-auto w-full">
+              <table className="min-w-[920px] w-full text-xs sm:text-sm">
                 <thead className="bg-gray-100 sticky top-0">
                   <tr>
                     <th className="p-2 md:p-3 text-left whitespace-nowrap">N°</th>
                     <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
                     <th className="p-2 md:p-3 text-left whitespace-nowrap">Cliente</th>
                     <th className="p-2 md:p-3 text-left hidden md:table-cell whitespace-nowrap">Producto</th>
-                    <th className="p-2 md:p-3 text-left hidden lg:table-cell whitespace-nowrap">Canal</th>
                     <th className="p-2 md:p-3 text-left whitespace-nowrap">Cant.</th>
-                    <th className="p-2 md:p-3 text-left whitespace-nowrap">Total</th>
+                    <th className="p-2 md:p-3 text-left whitespace-nowrap">Debe</th>
                     <th className="p-2 md:p-3 text-left hidden md:table-cell whitespace-nowrap">Pago</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ventasPendientes.map((v) => (
-                    <tr
-                      key={v.id}
-                      className="border-b hover:bg-yellow-50 transition"
-                    >
-                      <td className="p-2 md:p-3 font-semibold text-xs md:text-sm whitespace-nowrap">#{v.numero}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{formatearFecha(v.fecha)}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap font-semibold">{v.cliente}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm hidden md:table-cell whitespace-nowrap">{v.producto_nombre}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm hidden lg:table-cell whitespace-nowrap">{v.canal_venta}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{v.cantidad}</td>
-                      <td className="p-2 md:p-3 font-bold text-xs md:text-sm whitespace-nowrap text-yellow-600">${v.total || 0}</td>
-                      <td className="p-2 md:p-3 text-xs md:text-sm hidden md:table-cell whitespace-nowrap">
-                        <span className="px-2 py-1 rounded text-white text-xs font-semibold bg-red-500">
-                          Pendiente
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {ventasPendientes.map((v) => {
+                    const montoPendiente = Number(v.monto_pendiente ?? v.total ?? 0);
+                    return (
+                      <tr
+                        key={v.id}
+                        className="border-b hover:bg-yellow-50 transition"
+                      >
+                        <td className="p-2 md:p-3 font-semibold text-xs md:text-sm whitespace-nowrap">#{v.numero}</td>
+                        <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{formatearFecha(v.fecha)}</td>
+                        <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap font-semibold">{v.cliente}</td>
+                        <td className="p-2 md:p-3 text-xs md:text-sm hidden md:table-cell whitespace-nowrap">{v.producto_nombre}</td>
+                        <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{v.cantidad}</td>
+                        <td className="p-2 md:p-3 font-bold text-xs md:text-sm whitespace-nowrap text-yellow-600">${montoPendiente}</td>
+                        <td className="p-2 md:p-3 text-xs md:text-sm hidden md:table-cell whitespace-nowrap">
+                          <span className="px-2 py-1 rounded text-white text-xs font-semibold bg-red-500">
+                            Pendiente
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1650,10 +1656,10 @@ const App = () => {
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Producto</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Cliente</th>
-                  <th className="p-2 md:p-3 text-left hidden lg:table-cell whitespace-nowrap">Canal</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Cant.</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">P. Unit.</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Total</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Pago</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Pagado</th>
                 </tr>
               </thead>
@@ -1664,10 +1670,10 @@ const App = () => {
                     <td className="p-2 md:p-3 whitespace-nowrap">{formatearFecha(v.fecha)}</td>
                     <td className="p-2 md:p-3 whitespace-nowrap">{v.producto_nombre}</td>
                     <td className="p-2 md:p-3 whitespace-nowrap">{v.cliente}</td>
-                    <td className="p-2 md:p-3 hidden lg:table-cell whitespace-nowrap">{v.canal_venta}</td>
                     <td className="p-2 md:p-3 whitespace-nowrap">{v.cantidad}</td>
                     <td className="p-2 md:p-3 whitespace-nowrap">${v.precio_unitario}</td>
                     <td className="p-2 md:p-3 font-bold whitespace-nowrap">${v.total || 0}</td>
+                    <td className="p-2 md:p-3 whitespace-nowrap">{getMetodoPagoLabel(v.metodo_pago)}</td>
                     <td className="p-2 md:p-3 whitespace-nowrap">
                       <span className={`px-2 py-1 rounded text-white text-xs font-semibold ${v.pagado ? 'bg-green-500' : 'bg-red-500'}`}>
                         {v.pagado ? 'Sí' : 'No'}
@@ -1902,8 +1908,8 @@ const App = () => {
               </datalist>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs md:text-sm">
+          <div className="overflow-x-auto w-full">
+            <table className="min-w-[920px] w-full text-xs md:text-sm">
               <thead className="bg-gray-100 sticky top-0">
                 <tr>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
@@ -1951,6 +1957,11 @@ const App = () => {
     const [editingVenta, setEditingVenta] = useState(null);
     const [ventasPage, setVentasPage] = useState({ results: [], next: null, previous: null, count: 0 });
     const [ventasLoading, setVentasLoading] = useState(false);
+    const [filtroFecha, setFiltroFecha] = useState('');
+    const [filtroProducto, setFiltroProducto] = useState('');
+    const [filtroCliente, setFiltroCliente] = useState('');
+    const [productoSuggestions, setProductoSuggestions] = useState([]);
+    const [clienteSuggestions, setClienteSuggestions] = useState([]);
 
     const ventasArray = ventasPage.results || [];
     const filterableColumns = [
@@ -1958,7 +1969,6 @@ const App = () => {
       { key: 'fecha', label: 'Fecha' },
       { key: 'producto_nombre', label: 'Producto' },
       { key: 'cliente', label: 'Cliente' },
-      { key: 'canal_venta', label: 'Canal', hiddenClass: 'hidden lg:table-cell' },
       { key: 'cantidad', label: 'Cant.' },
       { key: 'precio_unitario', label: 'P. Unit.' },
       { key: 'total', label: 'Total' },
@@ -1982,27 +1992,37 @@ const App = () => {
       return options;
     }, [ventasArray]);
 
-    const toggleFilterOption = (columnKey, value) => {
-      setActiveFilters((prev) => {
-        const next = { ...prev };
-        const current = new Set(next[columnKey] || []);
-        if (current.has(value)) {
-          current.delete(value);
-        } else {
-          current.add(value);
-        }
-        next[columnKey] = current;
-        return next;
+    useEffect(() => {
+      if (!filtroProducto) {
+        setProductoSuggestions([]);
+        return;
+      }
+      const query = filtroProducto.toLowerCase();
+      setProductoSuggestions(productos.filter((producto) => producto.nombre?.toLowerCase().includes(query)).slice(0, 8));
+    }, [filtroProducto, productos]);
+
+    useEffect(() => {
+      if (!filtroCliente) {
+        setClienteSuggestions([]);
+        return;
+      }
+      const query = filtroCliente.toLowerCase();
+      const clientes = [...new Set(ventasArray.map((venta) => venta.cliente).filter(Boolean))].filter((cliente) => cliente.toLowerCase().includes(query));
+      setClienteSuggestions(clientes.slice(0, 8));
+    }, [filtroCliente, ventasArray]);
+
+    const ventasFiltradas = useMemo(() => {
+      return ventasArray.filter((venta) => {
+        const fechaTexto = formatearFecha(venta.fecha).toLowerCase();
+        const fechaRaw = String(venta.fecha || '').toLowerCase();
+        const producto = String(venta.producto_nombre || '').toLowerCase();
+        const cliente = String(venta.cliente || '').toLowerCase();
+        const coincideFecha = !filtroFecha || fechaTexto.includes(filtroFecha.toLowerCase()) || fechaRaw.includes(filtroFecha.toLowerCase());
+        const coincideProducto = !filtroProducto || producto.includes(filtroProducto.toLowerCase());
+        const coincideCliente = !filtroCliente || cliente.includes(filtroCliente.toLowerCase());
+        return coincideFecha && coincideProducto && coincideCliente;
       });
-    };
-
-    const clearFilterForColumn = (columnKey) => {
-      setActiveFilters((prev) => ({ ...prev, [columnKey]: new Set() }));
-    };
-
-    const toggleColumnFilterMenu = (columnKey) => {
-      setActiveColumnFilter((prev) => (prev === columnKey ? null : columnKey));
-    };
+    }, [ventasArray, filtroFecha, filtroProducto, filtroCliente]);
 
     const loadVentasPage = useCallback(async ({ pageUrl = null, mes = selectedMonth, anio = selectedYear, ordering = orderingValue, filters = appliedFilters } = {}) => {
       setVentasLoading(true);
@@ -2023,186 +2043,6 @@ const App = () => {
     useEffect(() => {
       loadVentasPage({ pageUrl: null, mes: selectedMonth, anio: selectedYear, ordering: orderingValue, filters: appliedFilters });
     }, [selectedMonth, selectedYear, orderingValue, appliedFilters, loadVentasPage]);
-
-    const renderHeaderCell = ({ key, label, hiddenClass }) => {
-      const selectedCount = activeFilters[key]?.size || 0;
-      const isOpen = activeColumnFilter === key;
-      const sortLabel = isNumericColumn(key) ? 'Menor a Mayor' : 'A-Z';
-      const reverseLabel = isNumericColumn(key) ? 'Mayor a Menor' : 'Z-A';
-
-      return (
-        <th className={`p-2 md:p-3 text-left whitespace-nowrap ${hiddenClass ?? ''} relative`}>
-          <div className="flex items-center gap-2">
-            <span>{label}</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleColumnFilterMenu(key);
-              }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
-              aria-label={`Abrir opciones de filtro y orden para ${label}`}
-            >
-              ▾
-            </button>
-            {selectedCount > 0 && (
-              <span className="inline-flex h-5 items-center rounded-full bg-blue-500 px-2 text-[11px] font-semibold text-white">
-                {selectedCount}
-              </span>
-            )}
-          </div>
-
-          {!isMobile && isOpen && (
-            <div className="absolute right-0 top-full z-30 mt-2 w-[18rem] min-w-[220px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">{label}</p>
-                <button type="button" onClick={() => setActiveColumnFilter(null)} className="text-sm text-gray-500 hover:text-gray-800">
-                  Cerrar
-                </button>
-              </div>
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortColumn(key);
-                    setSortOrder('asc');
-                    setActiveColumnFilter(null);
-                  }}
-                  className={`w-full rounded border px-3 py-2 text-left text-sm ${sortColumn === key && sortOrder === 'asc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
-                >
-                  {sortLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortColumn(key);
-                    setSortOrder('desc');
-                    setActiveColumnFilter(null);
-                  }}
-                  className={`w-full rounded border px-3 py-2 text-left text-sm ${sortColumn === key && sortOrder === 'desc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
-                >
-                  {reverseLabel}
-                </button>
-              </div>
-              <div className="mt-4">
-                <p className="text-sm font-semibold mb-2">Filtrar por valores</p>
-                <div className="max-h-44 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2">
-                  {columnOptions[key]?.length ? (
-                    columnOptions[key].map((option) => {
-                      const normalized = String(option);
-                      return (
-                        <label key={`${key}-${normalized}`} className="mb-1 flex cursor-pointer items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={activeFilters[key]?.has(option)}
-                            onChange={() => toggleFilterOption(key, option)}
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                          />
-                          <span className="truncate">{normalized}</span>
-                        </label>
-                      );
-                    })
-                  ) : (
-                    <p className="text-sm text-gray-500">Sin valores para filtrar</p>
-                  )}
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => clearFilterForColumn(key)}
-                    className="text-sm text-gray-600 hover:text-gray-900"
-                  >
-                    Limpiar filtros
-                  </button>
-                  <span className="text-xs text-gray-500">Toca fuera para cerrar</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </th>
-      );
-    };
-
-    const renderMobileFilterSheet = () => {
-      if (!activeColumnFilter) return null;
-      const activeColumn = filterableColumns.find((col) => col.key === activeColumnFilter);
-      const label = activeColumn?.label || 'Filtro';
-      const sortLabel = isNumericColumn(activeColumnFilter) ? 'Menor a Mayor' : 'A-Z';
-      const reverseLabel = isNumericColumn(activeColumnFilter) ? 'Mayor a Menor' : 'Z-A';
-
-      return (
-        <div className="fixed inset-0 z-40 bg-black/40 flex items-end md:hidden" onClick={() => setActiveColumnFilter(null)}>
-          <div className="w-full max-h-[88vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-lg font-semibold">{label}</p>
-                <p className="text-sm text-gray-500">Ordenar y filtrar</p>
-              </div>
-              <button type="button" onClick={() => setActiveColumnFilter(null)} className="text-sm font-semibold text-gray-700">
-                Cerrar
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm font-semibold">Orden</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortColumn(activeColumnFilter);
-                    setSortOrder('asc');
-                    setActiveColumnFilter(null);
-                  }}
-                  className={`w-full rounded-xl border px-4 py-3 text-left text-sm ${sortColumn === activeColumnFilter && sortOrder === 'asc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
-                >
-                  {sortLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortColumn(activeColumnFilter);
-                    setSortOrder('desc');
-                    setActiveColumnFilter(null);
-                  }}
-                  className={`w-full rounded-xl border px-4 py-3 text-left text-sm ${sortColumn === activeColumnFilter && sortOrder === 'desc' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-700'}`}
-                >
-                  {reverseLabel}
-                </button>
-              </div>
-              <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm font-semibold">Filtrar por valores</p>
-                <div className="max-h-60 overflow-y-auto space-y-2">
-                  {columnOptions[activeColumnFilter]?.length ? (
-                    columnOptions[activeColumnFilter].map((option) => {
-                      const normalized = String(option);
-                      return (
-                        <label key={`mobile-${activeColumnFilter}-${normalized}`} className="flex cursor-pointer items-center gap-3 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={activeFilters[activeColumnFilter]?.has(option)}
-                            onChange={() => toggleFilterOption(activeColumnFilter, option)}
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                          />
-                          <span>{normalized}</span>
-                        </label>
-                      );
-                    })
-                  ) : (
-                    <p className="text-sm text-gray-500">Sin valores para filtrar</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => clearFilterForColumn(activeColumnFilter)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                >
-                  Limpiar filtros
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
 
     const handleEditVenta = (venta) => {
       setEditingVenta(venta);
@@ -2265,6 +2105,56 @@ const App = () => {
               </div>
             </div>
 
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por fecha</label>
+                <input
+                  type="date"
+                  value={filtroFecha}
+                  onChange={(e) => setFiltroFecha(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="relative">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por producto</label>
+                <input
+                  type="text"
+                  value={filtroProducto}
+                  onChange={(e) => setFiltroProducto(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  placeholder="Escribe para buscar"
+                />
+                {productoSuggestions.length > 0 && (
+                  <ul className="absolute z-10 mt-1 w-full rounded border border-gray-200 bg-white shadow">
+                    {productoSuggestions.map((producto) => (
+                      <li key={producto.id} className="cursor-pointer px-3 py-2 text-sm hover:bg-gray-100" onClick={() => setFiltroProducto(producto.nombre)}>
+                        {producto.nombre}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="relative">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Filtrar por cliente</label>
+                <input
+                  type="text"
+                  value={filtroCliente}
+                  onChange={(e) => setFiltroCliente(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                  placeholder="Escribe para buscar"
+                />
+                {clienteSuggestions.length > 0 && (
+                  <ul className="absolute z-10 mt-1 w-full rounded border border-gray-200 bg-white shadow">
+                    {clienteSuggestions.map((cliente) => (
+                      <li key={cliente} className="cursor-pointer px-3 py-2 text-sm hover:bg-gray-100" onClick={() => setFiltroCliente(cliente)}>
+                        {cliente}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
             <div className="mt-4 flex items-center gap-2">
               <button
                 type="button"
@@ -2299,24 +2189,24 @@ const App = () => {
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs sm:text-sm">
+          <div className="overflow-x-auto w-full">
+            <table className="min-w-[1100px] w-full text-xs sm:text-sm">
               <thead className="bg-gray-100 sticky top-0">
                 <tr>
-                  {renderHeaderCell({ key: 'numero', label: 'N°' })}
-                  {renderHeaderCell({ key: 'fecha', label: 'Fecha' })}
-                  {renderHeaderCell({ key: 'producto_nombre', label: 'Producto' })}
-                  {renderHeaderCell({ key: 'cliente', label: 'Cliente' })}
-                  {renderHeaderCell({ key: 'canal_venta', label: 'Canal', hiddenClass: 'hidden lg:table-cell' })}
-                  {renderHeaderCell({ key: 'cantidad', label: 'Cant.' })}
-                  {renderHeaderCell({ key: 'precio_unitario', label: 'P. Unit.' })}
-                  {renderHeaderCell({ key: 'total', label: 'Total' })}
-                  {renderHeaderCell({ key: 'pagado', label: 'Pagado' })}
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">N°</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Fecha</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Producto</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Cliente</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Cant.</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">P. Unit.</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Total</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Pago</th>
+                  <th className="p-2 md:p-3 text-left whitespace-nowrap">Pagado</th>
                   <th className="p-2 md:p-3 text-left whitespace-nowrap">Eliminar</th>
                 </tr>
               </thead>
               <tbody>
-                {ventasArray.map((v) => (
+                {ventasFiltradas.map((v) => (
                   <tr
                     key={v.id}
                     onClick={() => handleEditVenta(v)}
@@ -2326,10 +2216,10 @@ const App = () => {
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{formatearFecha(v.fecha)}</td>
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{v.producto_nombre}</td>
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{v.cliente}</td>
-                    <td className="p-2 md:p-3 text-xs md:text-sm hidden lg:table-cell whitespace-nowrap">{v.canal_venta}</td>
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{v.cantidad}</td>
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">${v.precio_unitario}</td>
                     <td className="p-2 md:p-3 font-bold text-xs md:text-sm whitespace-nowrap">${v.total || 0}</td>
+                    <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">{getMetodoPagoLabel(v.metodo_pago)}</td>
                     <td className="p-2 md:p-3 text-xs md:text-sm whitespace-nowrap">
                       <span className={`px-2 py-1 rounded text-white text-xs font-semibold ${v.pagado ? 'bg-green-500' : 'bg-red-500'}`}>
                         {v.pagado ? 'Sí' : 'No'}
@@ -2365,10 +2255,9 @@ const App = () => {
               </tbody>
             </table>
           </div>
-          {renderMobileFilterSheet()}
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-gray-600">
-              Mostrando {ventasArray.length} de {ventasPage.count} ventas
+              Mostrando {ventasFiltradas.length} de {ventasPage.count} ventas
             </div>
             <div className="flex items-center gap-2">
               <button
